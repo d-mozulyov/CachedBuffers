@@ -52,3 +52,7 @@
 # Delphi history and backups
 __history/
 *.~*
+demos/bin/correct_file.txt
+demos/bin/out.txt
+demos/reading.res
+demos/writing.res
