@@ -149,7 +149,7 @@ type
   TBenchmarkProc = function(const FileName: string): Int64;
 
 var
-  ProcNumber: Cardinal = 0;
+  ProcNumber: Cardinal = 0; // test comment 
 
 // standard way to read and process strings:
 // with TStringList
