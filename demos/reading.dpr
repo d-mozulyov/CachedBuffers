@@ -151,7 +151,6 @@ type
 var
   ProcNumber: Cardinal = 0;
 
-
 // standard way to read and process strings:
 // with TStringList
 function StringListReader(const FileName: string): Int64;
