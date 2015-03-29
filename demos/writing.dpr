@@ -249,7 +249,7 @@ var
   iteration, i: Integer;
   Writer: TCachedFileWriter;
 begin
-  Writer.Initialize(FileName);
+//  Writer.Initialize(FileName);
   try
     for iteration := 1 to ITERATIONS_COUNT do
     for i := Low(STRINGS) to High(STRINGS) do
@@ -260,7 +260,7 @@ begin
     end;
 
   finally
-    Writer.Finalize;
+//    Writer.Finalize;
   end;
 end;
 
@@ -271,7 +271,7 @@ var
   iteration, i: Integer;
   Writer: TCachedFileWriter;
 begin
-  Writer.Initialize(FileName);
+//  Writer.Initialize(FileName);
   try
     for iteration := 1 to ITERATIONS_COUNT do
     for i := Low(STRINGS) to High(STRINGS) do
@@ -284,7 +284,7 @@ begin
         else PInt64(Writer.Current)^ := PInt64(S)^;
 
         Inc(NativeInt(Writer.Current), Len);
-        Dec(Writer.Margin, Len);
+//        Dec(Writer.Margin, Len);
       end else
       begin
         // smart Move
@@ -294,14 +294,14 @@ begin
       // CRLF
       PWord(Writer.Current)^ := CRLF_VALUE;
       Inc(NativeInt(Writer.Current), SizeOf(Word));
-      Dec(Writer.Margin, SizeOf(Word));
+//      Dec(Writer.Margin, SizeOf(Word));
 
       // Flush if needed
-      if (Writer.Margin <= 0) then Writer.Flush;
+//      if (Writer.Margin <= 0) then Writer.Flush;
     end;
 
   finally
-    Writer.Finalize;
+//    Writer.Finalize;
   end;
 end;
 

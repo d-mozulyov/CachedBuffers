@@ -238,12 +238,12 @@ var
   Current: PAnsiChar;
 begin
   Result := 0;
-  Reader.Initialize(FileName);
+//  Reader.Initialize(FileName);
   try
     while (True) do
     begin
-      Size := Reader.Margin;
-      Current := Reader.Current;
+//      Size := Reader.Margin;
+//      Current := Reader.Current;
 
       while (True) do
       begin
@@ -258,7 +258,7 @@ begin
         // look length of string
         Len := 1;
         while (Len < Size) and (not (Current[Len] in [#13, #10])) do Inc(Len);
-        if (Len = Size) and (not Reader.Finishing) then goto flush;
+//        if (Len = Size) and (not Reader.Finishing) then goto flush;
         if (Len > 255) then exit;
 
         // get string + to int
@@ -272,13 +272,13 @@ begin
       end;
 
     flush:
-      Reader.Margin := Size;
-      Reader.Current := Current;
-      if (Reader.Finishing) then Break;
+//      Reader.Margin := Size;
+//      Reader.Current := Current;
+//      if (Reader.Finishing) then Break;
       Reader.Flush();
     end;
   finally
-    Reader.Finalize();
+//    Reader.Finalize();
   end;
 end;
 
