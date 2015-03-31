@@ -1,7 +1,7 @@
 unit CachedStreams;
 
 {******************************************************************************}
-{ Copyright (c) 2013-2014 Dmitry Mozulyov (aka Devil)                          }
+{ Copyright (c) 2013-2015 Dmitry Mozulyov                                      }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -22,9 +22,8 @@ unit CachedStreams;
 { THE SOFTWARE.                                                                }
 {                                                                              }
 { email: softforyou@inbox.ru                                                   }
-{ icq: 250481638                                                               }
 { skype: dimandevil                                                            }
-{ site: http://sourceforge.net/projects/cachedbuffers/                         }
+{ repository: https://github.com/d-mozulyov/CachedBuffers                      }
 {******************************************************************************}
 
 

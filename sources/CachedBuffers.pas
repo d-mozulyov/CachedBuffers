@@ -1,7 +1,7 @@
 unit CachedBuffers;
 
 {******************************************************************************}
-{ Copyright (c) 2013-2014 Dmitry Mozulyov (aka Devil)                          }
+{ Copyright (c) 2013-2015 Dmitry Mozulyov                                      }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -22,9 +22,8 @@ unit CachedBuffers;
 { THE SOFTWARE.                                                                }
 {                                                                              }
 { email: softforyou@inbox.ru                                                   }
-{ icq: 250481638                                                               }
 { skype: dimandevil                                                            }
-{ site: http://sourceforge.net/projects/cachedbuffers/                         }
+{ repository: https://github.com/d-mozulyov/CachedBuffers                      }
 {******************************************************************************}
 
 
@@ -87,24 +86,32 @@ const
   soFromEnd = 2;
 
 type
+  // standard types
   {$if CompilerVersion < 19}
   NativeInt = Integer;
   PNativeInt = PInteger;
   NativeUInt = Cardinal;
   PNativeUInt = PCardinal;
   {$ifend}
-
-  TBytes = array of Byte;
-
+  {$if (not Defined(FPC)) and (CompilerVersion < 15)}
+  UInt64 = Int64;
+  PUInt64 = ^UInt64;
+  {$ifend}
   {$if CompilerVersion < 23}
   TExtended80Rec = Extended;
   PExtended80Rec = ^TExtended80Rec;
   {$ifend}
+  TBytes = array of Byte;
 
+  // exception class
   ECachedBuffer = class(Exception)
   {$ifdef KOL}
     constructor Create(const Msg: string);
     constructor CreateFmt(const Msg: string; const Args: array of const);
+    constructor CreateRes(Ident: NativeUInt); overload;
+    constructor CreateRes(ResStringRec: PResStringRec); overload;
+    constructor CreateResFmt(Ident: NativeUInt; const Args: array of const); overload;
+    constructor CreateResFmt(ResStringRec: PResStringRec; const Args: array of const); overload;
   {$endif}
   end;
 
@@ -541,6 +548,65 @@ constructor ECachedBuffer.CreateFmt(const Msg: string;
   const Args: array of const);
 begin
   inherited CreateFmt(e_Custom, Msg, Args);
+end;
+
+type
+  PStrData = ^TStrData;
+  TStrData = record
+    Ident: Integer;
+    Buffer: PKOLChar;
+    BufSize: Integer;
+    nChars: Integer;
+  end;
+
+function EnumStringModules(Instance: NativeInt; Data: Pointer): Boolean;
+begin
+  with PStrData(Data)^ do
+  begin
+    nChars := LoadString(Instance, Ident, Buffer, BufSize);
+    Result := nChars = 0;
+  end;
+end;
+
+function FindStringResource(Ident: Integer; Buffer: PKOLChar; BufSize: Integer): Integer;
+var
+  StrData: TStrData;
+begin
+  StrData.Ident := Ident;
+  StrData.Buffer := Buffer;
+  StrData.BufSize := BufSize;
+  StrData.nChars := 0;
+  EnumResourceModules(EnumStringModules, @StrData);
+  Result := StrData.nChars;
+end;
+
+function LoadStr(Ident: Integer): string;
+var
+  Buffer: array[0..1023] of KOLChar;
+begin
+  SetString(Result, Buffer, FindStringResource(Ident, Buffer, SizeOf(Buffer)));
+end;
+
+constructor ECachedBuffer.CreateRes(Ident: NativeUInt);
+begin
+  inherited Create(e_Custom, LoadStr(Ident));
+end;
+
+constructor ECachedBuffer.CreateRes(ResStringRec: PResStringRec);
+begin
+  inherited Create(e_Custom, System.LoadResString(ResStringRec));
+end;
+
+constructor ECachedBuffer.CreateResFmt(Ident: NativeUInt;
+  const Args: array of const);
+begin
+  inherited CreateFmt(e_Custom, LoadStr(Ident), Args);
+end;
+
+constructor ECachedBuffer.CreateResFmt(ResStringRec: PResStringRec;
+  const Args: array of const);
+begin
+  inherited CreateFmt(e_Custom, System.LoadResString(ResStringRec), Args);
 end;
 {$endif}
 
@@ -3184,7 +3250,7 @@ constructor TCachedFileReader.Create(const FileName: string; const Offset,
   end;
 begin
   {$ifdef MSWINDOWS}
-  FHandle := CreateFile(PChar(FileName), $0001{FILE_READ_DATA}, FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
+  FHandle := Windows.CreateFile(PChar(FileName), $0001{FILE_READ_DATA}, FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
   {$else}
   FHandle := FileOpen(FileName, fmOpenRead or fmShareDenyNone);
   {$endif}
@@ -3246,7 +3312,7 @@ end;
 constructor TCachedFileWriter.Create(const FileName: string);
 begin
   {$ifdef MSWINDOWS}
-  FHandle := CreateFile(PChar(FileName), $0002{FILE_WRITE_DATA}, FILE_SHARE_READ, nil, CREATE_ALWAYS, 0, 0);
+  FHandle := Windows.CreateFile(PChar(FileName), $0002{FILE_WRITE_DATA}, FILE_SHARE_READ, nil, CREATE_ALWAYS, 0, 0);
   {$else}
   FHandle := FileCreate(FileName);
   {$endif}
@@ -3387,11 +3453,11 @@ procedure TCachedResourceReader.InternalCreate(Instance: THandle; Name,
     N, T: string;
   begin
     V := NativeUInt(Name);
-    if (V <= High(Word)) then N := '#' + {$ifdef KOL}Int2Str{$else}IntToStr{$endif}(Integer(V))
+    if (V <= High(Word)) then N := '#' + string({$ifdef KOL}Int2Str{$else}IntToStr{$endif}(Integer(V)))
     else N := '"' + string(Name) + '"';
 
     V := NativeUInt(ResType);
-    if (V <= High(Word)) then T := '#' + {$ifdef KOL}Int2Str{$else}IntToStr{$endif}(Integer(V))
+    if (V <= High(Word)) then T := '#' + string({$ifdef KOL}Int2Str{$else}IntToStr{$endif}(Integer(V)))
     else T:= '"' + string(ResType) + '"';
 
     raise ECachedBuffer.CreateFmt('Resource %s (%s) not found', [N, T]);
@@ -3400,7 +3466,7 @@ procedure TCachedResourceReader.InternalCreate(Instance: THandle; Name,
 var
   HResInfo: THandle;
 begin
-  HResInfo := FindResource(Instance, Name, ResType);
+  HResInfo := Windows.FindResource(Instance, Name, ResType);
   if (HResInfo = 0) then RaiseNotFound;
   HGlobal := LoadResource(Instance, HResInfo);
   if (HGlobal = 0) then RaiseNotFound;
