@@ -87,23 +87,28 @@ const
 
 type
   // standard types
-  {$if CompilerVersion < 19}
-  NativeInt = Integer;
-  PNativeInt = PInteger;
-  {$ifend}
-  {$if CompilerVersion < 22}
-  PNativeInt = ^NativeInt;
-  PNativeUInt = ^NativeUInt;
-  {$ifend}
-  {$if (not Defined(FPC)) and (CompilerVersion < 15)}
-  UInt64 = Int64;
-  PUInt64 = ^UInt64;
-  {$ifend}
-  {$if CompilerVersion < 23}
+  {$ifdef FPC}
+    PUInt64 = ^UInt64;
+  {$else}
+    {$if CompilerVersion < 15}
+      UInt64 = Int64;
+      PUInt64 = ^UInt64;
+    {$ifend}
+    {$if CompilerVersion < 19}
+      NativeInt = Integer;
+      PNativeInt = PInteger;
+    {$ifend}
+    {$if CompilerVersion < 22}
+      PNativeInt = ^NativeInt;
+      PNativeUInt = ^NativeUInt;
+    {$ifend}
+  {$endif}
+  {$if Defined(FPC) or (CompilerVersion < 23)}
   TExtended80Rec = Extended;
   PExtended80Rec = ^TExtended80Rec;
   {$ifend}
   TBytes = array of Byte;
+  PBytes = ^TBytes;
 
   // exception class
   ECachedBuffer = class(Exception)
@@ -559,7 +564,7 @@ type
     Str: string;
   end;
 
-function EnumStringModules(Instance: Longint; Data: Pointer): Boolean;
+function EnumStringModules(Instance: NativeInt; Data: Pointer): Boolean;
 var
   Buffer: array [0..1023] of Char;
 begin
@@ -573,10 +578,12 @@ end;
 function FindStringResource(Ident: Integer): string;
 var
   StrData: TStrData;
+  Func: TEnumModuleFunc;
 begin
   StrData.Ident := Ident;
   StrData.Str := '';
-  EnumResourceModules(EnumStringModules, @StrData);
+  Pointer(@Func) := @EnumStringModules;
+  EnumResourceModules(Func, @StrData);
   Result := StrData.Str;
 end;
 
@@ -3494,7 +3501,8 @@ end;
 
 
 
-//initialization
+initialization
+  FindStringResource(0);
 //  TCachedReader(nil).ReadData(PByte(nil)^);
 
 end.

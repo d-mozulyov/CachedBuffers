@@ -78,6 +78,34 @@ interface
        {$endif};
 
 type
+  // standard types
+  {$ifdef FPC}
+    PUInt64 = ^UInt64;
+  {$else}
+    {$if CompilerVersion < 15}
+      UInt64 = Int64;
+      PUInt64 = ^UInt64;
+    {$ifend}
+    {$if CompilerVersion < 19}
+      NativeInt = Integer;
+      PNativeInt = PInteger;
+    {$ifend}
+    {$if CompilerVersion < 22}
+      PNativeInt = ^NativeInt;
+      PNativeUInt = ^NativeUInt;
+    {$ifend}
+  {$endif}
+  {$if Defined(FPC) or (CompilerVersion < 23)}
+  TExtended80Rec = Extended;
+  PExtended80Rec = ^TExtended80Rec;
+  {$ifend}
+  TBytes = array of Byte;
+  PBytes = ^TBytes;
+
+  // CachedBuffers types
+  // todo
+
+  // Classes.TStream or KOL.PStream
   StreamType = {$ifdef KOL}PStream{$else}TStream{$endif};
 
 { TCachedStreamReader class }
