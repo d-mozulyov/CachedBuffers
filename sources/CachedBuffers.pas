@@ -124,6 +124,10 @@ type
 
 { TCachedBuffer abstract class }
 
+  TCachedBuffer = class;
+  TCachedBufferFlushCallback = function(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt of object;
+  TCachedBufferProgressEvent = procedure(Sender: TCachedBuffer; var Cancel: Boolean) of object;
+
   TCachedBufferMemory = record
     Handle: Pointer;
     PreviousSize: NativeUInt;   // 0..inf = Handle..Buffer
@@ -132,76 +136,77 @@ type
     AdditionalSize: NativeUInt; // bonus memory after "Buffer+BufferSize", 4kb minimum
   end;
   PCachedBufferMemory = ^TCachedBufferMemory;
-           {$message 'проработать всЄ! Position, Seek, Size, Flush, ошибки!!!'}
+           {$message 'проработать всЄ! Position, Seek, Size, ошибки!!!'}
+
   TCachedBuffer = class(TObject)
   protected
-    FMemory: TCachedBufferMemory;
-    FOverflow: PByte;
-    FCallback: TMethod;
-    FFlushedPosition: Int64;
     FIsReader: Boolean;
-    FIsFinishing: Boolean;
+    FReaderFinishing: Boolean;
+    FFinished: Boolean;
+    FSeekable: Boolean;
+    FLimited: Boolean;
+
     FReserved1: Boolean;
     FReserved2: Boolean;
-
-    procedure RaiseReadWrite(const Size: NativeInt);
-    procedure RaiseFinishing(const Action: string);
-    procedure RaiseOperation(const Operation: string);
-    procedure RaiseVaraintType(const VType: Word);
-    function GetPosition: Int64; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure SetPosition(const Value: Int64);
-    procedure DoFlush; virtual; abstract;
   protected
-    constructor Create(const IsReader: Boolean; const Callback: TMethod; const BufferSize: NativeUInt = 0);
+    FPositionBase: Int64;
+    FLimit: Int64;
+    FMemory: TCachedBufferMemory;
+    FOverflow: PByte;
+    FFlushCallback: TCachedBufferFlushCallback;
+    FOnProgress: TCachedBufferProgressEvent;
+
+    function GetMargin: NativeInt; {$ifdef INLINESUPPORT}inline;{$endif}
+    function GetPosition: Int64; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure SetLimit(const Value: Int64);
+    procedure SetPosition(const Value: Int64);
+    function ProgressUsed: Boolean;
+
+    function DoWriterFlush: Boolean;
+    function DoReaderFlush: Boolean;
+    function DoProgress: Boolean;
+    function Progress: Boolean; virtual;
+    function CheckLimit(const Value: Int64): Boolean; virtual;
+  private
+    procedure SetFinished(const Value: Boolean);
+  protected
+    constructor Create(const IsReader: Boolean; const FlushCallback: TCachedBufferFlushCallback; const BufferSize: NativeUInt = 0);
     procedure CopyParameters(const Source: TCachedBuffer);
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
     destructor Destroy; override;
   public
-    // you can use highlevel Write(TCachedWriter) and Read(TCachedReader) methods,
-    // but to have the really maximum performance, you should use Current, Margin and Flush()
-
-    // current pointer in cached buffer
+    procedure AfterConstruction; override;
+    procedure BeforeDestruction; override;
+  public
+    // basic interface
     Current: PByte;
-    // available memory size in cached buffer
-  //  Margin: NativeInt;
-
-    //
+    function Flush: NativeUInt;
+    property Overflow: PByte read FOverflow;
+    property Margin: NativeInt read GetMargin;
+    property Finished: Boolean read FFinished write SetFinished;
+    property Memory: TCachedBufferMemory read FMemory;
+    property OnProgress: TCachedBufferProgressEvent read FOnProgress write FOnProgress;
+  public
+    // position and size
     procedure Seek(const Offset: NativeInt); overload;
     function Seek(const Offset: Int64; const Origin: Word): Int64; overload;
 
-    // call Flush() when the buffer ends (small or zero Margin) to update buffer, Current and Margin
-    // - don't call Flush if Finishing flag is on (which is set when
-    //   callback reading/writing size is not equal fixed buffer size)
-    // - you can fill some additional memory in TCachedWriter (Margin < 0),
-    //   the memory will be automatically moved to Buffer area after Flush time,
-    //   but be attention, AdditionalSize may be 4kb only
-    // - you can leave some margin memory in TCachedReader before Flush calling,
-    //   the memory will be available, because it's automatically moved in Previous area.
-    //   negative Margin (additional memory) is ignored in TCachedReader
-    function Flush: NativeInt;
-
-    property Overflow: PByte read FOverflow;
-
-    // useful properties
-    property IsFinishing: Boolean read FIsFinishing;
-    property Memory: TCachedBufferMemory read FMemory;
     property Position: Int64 read GetPosition write SetPosition;
+    property Seekable: Boolean read FSeekable;
+    property Limited: Boolean read FLimited;
+    property Limit: Int64 read FLimit write SetLimit;
   end;
 
 { TCachedReader class }
 
-  TCachedReader = class;
-  TCachedReaderCallback = function(Sender: TCachedReader; Buffer: PByte; BufferSize: NativeUInt): NativeUInt of object;
-
   TCachedReader = class(TCachedBuffer)
   protected
-    procedure RaiseFinishedReading();
     procedure DifficultRead(Buffer: PByte; Count: NativeUInt);
-    procedure DoFlush; override;{$if CompilerVersion >= 17}final;{$ifend}
   public
-    constructor Create(const Callback: TCachedReaderCallback; const BufferSize: NativeUInt = 0);
+    constructor Create(const FlushCallback: TCachedBufferFlushCallback; const BufferSize: NativeUInt = 0);
+    property Finishing: Boolean read FReaderFinishing;
 
     // TStream-like data reading
     procedure Read(var Buffer; const Count: NativeUInt);
@@ -241,15 +246,11 @@ type
 
 { TCachedWriter class }
 
-  TCachedWriter = class;
-  TCachedWriterCallback = function(Sender: TCachedWriter; Buffer: PByte; BufferSize: NativeUInt): NativeUInt of object;
-
   TCachedWriter = class(TCachedBuffer)
   protected
-    procedure DoFlush; override;{$if CompilerVersion >= 17}final;{$ifend}
     procedure DifficultWrite(Buffer: PByte; Count: NativeUInt);
   public
-    constructor Create(const Callback: TCachedWriterCallback; const BufferSize: NativeUInt = 0);
+    constructor Create(const FlushCallback: TCachedBufferFlushCallback; const BufferSize: NativeUInt = 0);
 
     // TStream-like data writing
     procedure Write(const Buffer; const Count: NativeUInt);
@@ -295,7 +296,7 @@ type
 
   TCachedReReader = class(TCachedReader)
   private
-    function InternalCallback(Sender: TCachedReader; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
   protected
     FSource: TCachedReader;
     FReCallback: TCachedReReaderCallback;
@@ -321,7 +322,7 @@ type
 
   TCachedReWriter = class(TCachedWriter)
   private
-    function InternalCallback(Sender: TCachedWriter; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
   protected
     FDestination: TCachedWriter;
     FReCallback: TCachedReWriterCallback;
@@ -348,7 +349,7 @@ type
     FHandle: THandle;
     FLimitSize: Int64;
 
-    function InternalCallback(Sender: TCachedReader; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
@@ -371,7 +372,7 @@ type
     FHandle: THandle;
     FLimitSize: Int64;
 
-    function InternalCallback(Sender: TCachedWriter; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
@@ -393,7 +394,7 @@ type
     FPtr: PByte;
     FPtrMargin: NativeUInt;
 
-    function InternalCallback(Sender: TCachedReader; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
   public
     constructor Create(const Ptr: Pointer; const Size: NativeUInt);
   end;
@@ -405,7 +406,7 @@ type
     FPtr: PByte;
     FPtrMargin: NativeUInt;
 
-    function InternalCallback(Sender: TCachedWriter; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
   public
     constructor Create(const Ptr: Pointer; const Size: NativeUInt);
   end;
@@ -541,6 +542,36 @@ type
 procedure NcMove(const Source; var Dest; const Size: NativeUInt); {$ifdef CPUARM}inline;{$endif}
 
 implementation
+
+procedure RaisePointers;
+begin
+  raise ECachedBuffer.Create('Invalid Current, Overflow or Buffer pointers value');
+end;
+
+procedure RaiseFinished;
+begin
+  raise ECachedBuffer.Create('Finished buffer data modified');
+end;
+
+procedure RaiseReading;
+begin
+  raise ECachedBuffer.Create('Data reading error');
+end;
+
+procedure RaiseWriting;
+begin
+  raise ECachedBuffer.Create('Data writing error');
+end;
+
+procedure RaiseLimitValue(const Value: Int64);
+begin
+  raise ECachedBuffer.CreateFmt('Invalid limit value %d', [Value]);
+end;
+
+procedure RaiseVaraintType(const VType: Word);
+begin
+  raise ECachedBuffer.CreateFmt('Invalid Variant type 0x%.4x', [VType]);
+end;
 
 
 { ECachedBuffer }
@@ -1534,34 +1565,87 @@ end;
 { TCachedBuffer }
 
 constructor TCachedBuffer.Create(const IsReader: Boolean;
-  const Callback: TMethod; const BufferSize: NativeUInt);
+  const FlushCallback: TCachedBufferFlushCallback; const BufferSize: NativeUInt);
 begin
   inherited Create;
   FIsReader := IsReader;
-  FCallback := Callback;
+  FFlushCallback := FlushCallback;
+  if (not Assigned(FFlushCallback)) then
+    raise ECachedBuffer.Create('Flush callback not defined');
 
   FMemory := CachedBufferMemory(Ord(IsReader){4kb}, BufferSize);
-
-  if (FIsReader) then
-  begin
-    Current := Pointer(NativeUInt(FMemory.Buffer)+FMemory.BufferSize);
-    FOverflow := Current;
-    DoFlush();
-  end else
+  FOverflow := Pointer(NativeUInt(FMemory.Buffer) + FMemory.BufferSize);
+  
+  if (not FIsReader) then
   begin
     Current := FMemory.Buffer;
-    FOverflow := Current;
-    Inc(FOverflow, FMemory.BufferSize);
+  end else
+  begin
+    Current := FOverflow;
+    FPositionBase := -Int64(FMemory.BufferSize);
   end;
+end;
+
+procedure TCachedBuffer.AfterConstruction;
+begin
+  inherited;
+  DoProgress;
+end;
+
+procedure TCachedBuffer.BeforeDestruction;
+begin
+  if (not FIsReader) and (not FFinished) and (Assigned(FFlushCallback)) then
+    Flush;
+
+  inherited;
+end;
+
+destructor TCachedBuffer.Destroy;
+begin
+  if (FMemory.Handle <> nil) then
+    FreeMem(FMemory.Handle);
+
+  inherited;
+end;
+
+procedure TCachedBuffer.SetFinished(const Value{True}: Boolean);
+begin
+  if (FFinished = Value) then Exit;
+  if (not Value) then
+    raise ECachedBuffer.Create('Can''t unfinish cached buffer');
+
+  FFinished := True;
+  FReaderFinishing := FIsReader;
+  FLimited := True;
+  FLimit := Self.Position;
+  FOverflow := Current;
+end;
+
+function TCachedBuffer.Progress: Boolean;
+var
+  Cancel: Boolean;
+begin
+  Cancel := FFinished;
+  if (Assigned(FOnProgress)) then FOnProgress(Self, Cancel);
+
+  Result := not Cancel;
+end;
+
+function TCachedBuffer.DoProgress: Boolean;
+begin
+  if (not Progress) then
+    Finished := True;
+
+  Result := (not FFinished);
 end;
 
 procedure TCachedBuffer.CopyParameters(const Source: TCachedBuffer);
 begin
   Self.FMemory := Source.FMemory;
   // Self.FCallback := Source.FCallback;
-  Self.FFlushedPosition := Source.FFlushedPosition;
+  Self.FPositionBase := Source.FPositionBase;
   Self.FIsReader := Source.FIsReader;
-  Self.FIsFinishing := Source.FIsFinishing;
+  Self.FFinished := Source.FFinished;
   // FReserved1: Boolean;
   // FReserved2: Boolean;
   Self.Current := Source.Current;
@@ -1570,55 +1654,75 @@ end;
 
 (*function TCachedBuffer.GetSize: Int64;
 begin
-  Result := {FPtrMargin +???} {Position}FFlushedPosition + (NativeInt(Current)-NativeInt(FMemory.Buffer));
+  Result := {FPtrMargin +???} {Position}FPositionBase + (NativeInt(Current)-NativeInt(FMemory.Buffer));
 
   if (not FIsReader) then
     Inc(Result, Margin);
 end;*)
 
-destructor TCachedBuffer.Destroy;
+function TCachedBuffer.GetMargin: NativeInt;
+var
+  P: NativeInt;
 begin
-  if (not FIsReader) and (not FIsFinishing) then Flush;
-
-  if (FMemory.Handle <> nil) then
-  FreeMem(FMemory.Handle);
-
-  inherited;
-end;
-
-procedure TCachedBuffer.RaiseReadWrite(const Size: NativeInt);
-const
-  READ_WRITE: array[Boolean] of string = ('write', 'read');
-begin
-  raise ECachedBuffer.CreateFmt('Can''t %s %d bytes', [READ_WRITE[FIsReader], Size]);
-end;
-
-procedure TCachedBuffer.RaiseFinishing(const Action: string);
-const
-  READER_WRITER: array[Boolean] of string = ('writer', 'reader');
-begin
-  raise ECachedBuffer.CreateFmt('Can''t %s, because %s is already finishing',
-                                [Action, READER_WRITER[FIsReader]]);
-end;
-
-procedure TCachedBuffer.RaiseOperation(const Operation: string);
-begin
-  raise ECachedBuffer.CreateFmt('"%s" is invalid %s instance operation', [ClassName, Operation]);
-end;
-
-procedure TCachedBuffer.RaiseVaraintType(const VType: Word);
-begin
-  raise ECachedBuffer.CreateFmt('Unsupported Variant type 0x%x', [VType]);
+  //Result := NativeInt(FOverflow) - NativeInt(Current);
+  P := NativeInt(Current);
+  Result := NativeInt(FOverflow);
+  Dec(Result, P);
 end;
 
 function TCachedBuffer.GetPosition: Int64;
 begin
-  Result := FFlushedPosition + (NativeInt(Current)-NativeInt(FMemory.Buffer));
+  Result := FPositionBase + (NativeInt(Current) - NativeInt(FMemory.Buffer));
 end;
 
 procedure TCachedBuffer.SetPosition(const Value: Int64);
 begin
   // todo
+end;
+
+function TCachedBuffer.CheckLimit(const Value: Int64): Boolean;
+begin
+  Result := True;
+end;
+
+procedure TCachedBuffer.SetLimit(const Value: Int64);
+var
+  Position, MarginLimit: Int64;
+  Margin: NativeInt;
+begin
+  if (FLimited) and (Value = FLimit) then Exit;
+
+  // check limit value
+  Position := Self.Position;
+  if (FFinished) or (Value < 0) or (Position < Value) or
+     ({FIsReader and} FReaderFinishing and (Value > FLimit)) or
+     (not CheckLimit(Value)) then
+    RaiseLimitValue(Value);
+
+  // fill parameters
+  FLimited := True;
+  FLimit := Value;
+
+  // detect margin limit is too small
+  MarginLimit := Value - Position;
+  Margin := Self.Margin;
+  if (MarginLimit <= Margin) then
+  begin
+    // correct Margin to MarginLimit value
+    Dec(FOverflow, Margin - NativeInt(MarginLimit));
+
+    // ReaderFinishing & Finished
+    if (FIsReader) then
+    begin
+      FReaderFinishing := True;
+
+      if (Current = FOverflow) then
+      begin
+        Finished := True;
+        DoProgress;
+      end;
+    end;
+  end;
 end;
 
 procedure TCachedBuffer.Seek(const Offset: NativeInt);
@@ -1632,27 +1736,189 @@ begin
   // todo
 end;
 
-function TCachedBuffer.Flush: NativeInt;
+function TCachedBuffer.ProgressUsed: Boolean;
+var
+  Proc: function: Boolean of object;
+begin  
+  Proc := Self.Progress;
+  Result := (Assigned(FOnProgress)) or (TMethod(Proc).Code <> @TCachedBuffer.Progress);
+end;
+  
+function TCachedBuffer.Flush: NativeUInt;
+var
+  Cur, Over, Buf, MemLow, MemHigh: NativeUInt;
+  NewPositionBase: Int64;
+  NewFinished: Boolean;
 begin
-  // exception?
+  // out of range test
+  Cur := NativeUInt(Current);
+  Over := NativeUInt(FOverflow);
+  Buf := NativeUint(FMemory.Buffer);
+  MemLow := Buf - FMemory.PreviousSize;
+  MemHigh := Buf + FMemory.BufferSize + FMemory.AdditionalSize - 1;
+  if (Cur <= $ffff) or (Over <= $ffff) or (Buf <= $fff) or
+     (Cur < MemLow) or (Cur > MemHigh) or
+     (Over < MemLow) or (Over > MemHigh) or
+     ((not FIsReader) and (Cur < Buf)) then RaisePointers;
 
-  // по идее Flush надо сделать м€гкими
-  // а чтение-завись твЄрдыми типа всегда ReadBuffer/WriteBuffer
-  // но и c Seek кстати тоже что-то нужно сделать
-
-  if (not FIsFinishing) then
+  // finished
+  if (FFinished) then
   begin
-    Inc(FFlushedPosition, NativeInt(Current)-NativeInt(FMemory.Buffer));
-    DoFlush;
-  end;
-
-  Result := NativeInt(Self.Overflow) - NativeInt(Self.Current);
-
-  if (Result < 0) then
-  begin
-    Current := Overflow;
+    if (Current <> FOverflow) then RaiseFinished;
     Result := 0;
+    Exit;
   end;
+
+  // valid data reading/writing
+  if (not FIsReader) then
+  begin
+    if (FLimited) and (FLimit < Self.Position) then
+      RaiseWriting;
+  end else
+  begin
+    if (Cur > Over) then
+      RaiseReading;
+  end;
+
+  // idle flush
+  if {(FIsReader) and} (FReaderFinishing) then
+  begin
+    Result := (Over - Cur);
+
+    if (Result = 0) then
+    begin
+      Finished := True;
+      DoProgress;
+    end;
+
+    Exit;
+  end;
+
+  // flush buffer
+  NewPositionBase := Self.Position;
+  if (Cur > Over) then NewPositionBase := NewPositionBase - (Cur - Over);
+  NewFinished := False;
+  if (not FIsReader) then
+  begin
+    if (DoWriterFlush) then
+      NewFinished := True;
+  end else
+  begin
+    if (DoReaderFlush) then
+    begin
+      FReaderFinishing := True;
+      if (Current = FOverflow{R = 0}) then NewFinished := True;
+    end;
+  end;
+  FPositionBase := NewPositionBase;
+  FFinished := NewFinished;
+  DoProgress;
+
+  // Result
+  Result := Self.Margin;
+end;
+
+function TCachedBuffer.DoWriterFlush: Boolean;
+var
+  FlushSize, R: NativeUInt;
+  OverflowSize: NativeUInt;
+  Margin: NativeInt;
+  MarginLimit: Int64;
+begin
+  // flush size
+  FlushSize := NativeUInt(Current) - NativeUInt(FMemory.Buffer);
+  Result := (FlushSize < FMemory.BufferSize);
+  OverflowSize := 0;
+  if (FlushSize > FMemory.BufferSize) then
+  begin
+    OverflowSize := FlushSize - FMemory.BufferSize;
+    FlushSize := FMemory.BufferSize;
+  end;
+
+  // detect margin limit
+  MarginLimit := High(Int64);
+  if (FLimited) then MarginLimit := FLimit - Position;
+
+  // run callback
+  if (FlushSize <> 0) then
+  begin
+    R := FFlushCallback(Self, FMemory.Buffer, FlushSize);
+    if (R <> FlushSize) then RaiseWriting;
+  end;
+
+  // current
+  Current := FMemory.Buffer;
+  if (OverflowSize <> 0) then
+  begin
+    NcMove(FOverflow^, Current^, OverflowSize);
+    Inc(Current, OverflowSize);
+  end;
+
+  // overflow correction
+  if (FLimited) then
+  begin
+    Margin := Self.Margin;
+    if (MarginLimit < Margin) then
+      Dec(FOverflow, Margin - NativeInt(MarginLimit));
+  end;
+end;
+
+function TCachedBuffer.DoReaderFlush: Boolean;
+var
+  Margin: NativeUInt;
+  Handle: Pointer;
+  Temp: TCachedBufferMemory;
+  MarginLimit: Int64;
+  FlushSize, R: NativeUInt;
+begin
+  Margin := Self.Margin;
+
+  // move margin data to previous memory
+  if (Margin > 0) then
+  begin
+    if (Margin > FMemory.PreviousSize) then
+    begin
+      Temp := CachedBufferMemory(Margin, FMemory.BufferSize);
+      Handle := FMemory.Handle;
+      try
+        NcMove(Current^, Pointer(NativeUInt(Temp.Buffer) - Margin)^, Margin);
+        FMemory := Temp;
+      finally
+        FreeMem(Handle);
+      end;
+    end else
+    begin
+      NcMove(Current^, Pointer(NativeUInt(FMemory.Buffer) - Margin)^, Margin);
+    end;
+  end;
+
+  // flush size
+  FlushSize := FMemory.BufferSize;
+  Result := False;
+  if (FLimited) then
+  begin
+    MarginLimit := FLimit - Position;
+    if (MarginLimit <= FlushSize) then
+    begin
+      FlushSize := MarginLimit;
+      Result := True;
+    end;
+  end;
+
+  // run callback
+  if (FlushSize = 0) then
+  begin
+    R := FlushSize{0};
+  end else
+  begin
+    R := FFlushCallback(Self, FMemory.Buffer, FlushSize);
+    if (R > FlushSize) then RaiseReading;
+    if (R < FlushSize) then Result := True;
+  end;
+
+  // current/overflow
+  Current := Pointer(NativeUInt(FMemory.Buffer) - Margin);
+  FOverflow := Pointer(NativeUInt(FMemory.Buffer) + R);
 end;
 
 
@@ -1660,76 +1926,22 @@ end;
 procedure NcMoveInternal(const Source; var Dest; const Size: NativeUInt); forward;
 {$endif}
 
-procedure TCachedReader.Read(var Buffer; const Count: NativeUInt);
-{$ifdef CPUARM}
-var
-  C: PByte;
-begin
-  C := Current;
-  Inc(C, Count);
-
-  if (C >= Self.Overflow) then
-  begin
-    DifficultRead(@Buffer, Count);
-  end else
-  begin
-    Current := C;
-    Dec(C, Count);
-    NcMove(C^, Buffer, Count);
-  end;
-end;
-{$else .CPUINTEL}
-asm
-  {$ifdef CPUX86}
-    xchg eax, ebx
-    push eax
-    mov eax, ecx
-    add eax, [EBX].TCachedReader.Current
-    cmp eax, [EBX].TCachedReader.FOverflow
-    ja @Difficult
-
-    mov [EBX].TCachedReader.Current, eax
-    sub eax, ecx
-    jmp NcMoveInternal
-  {$else .CPUX64}
-    mov rax, rcx
-    mov rcx, r8
-    add rcx, [RAX].TCachedReader.Current
-    cmp rcx, [RAX].TCachedReader.FOverflow
-    ja @Difficult
-
-    mov [RAX].TCachedReader.Current, rcx
-    sub rcx, r8
-    jmp NcMove
-  {$endif}
-
-@Difficult:
-  {$ifdef CPUX86}
-    xchg eax, ebx
-    pop ebx
-  {$else .CPUX64}
-    xchg rax, rcx
-  {$endif}
-  jmp DifficultRead
-end;
-{$endif}
-
 procedure TCachedWriter.Write(const Buffer; const Count: NativeUInt);
 {$ifdef CPUARM}
 var
-  C: PByte;
+  P: PByte;
 begin
-  C := Current;
-  Inc(C, Count);
+  P := Current;
+  Inc(P, Count);
 
-  if (C >= Self.Overflow) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultWrite(@Buffer, Count);
   end else
   begin
-    Current := C;
-    Dec(C, Count);
-    NcMove(Buffer, C^, Count);
+    Current := P;
+    Dec(P, Count);
+    NcMove(Buffer, P^, Count);
   end;
 end;
 {$else .CPUINTEL}
@@ -1769,6 +1981,61 @@ asm
   jmp DifficultWrite
 end;
 {$endif}
+
+procedure TCachedReader.Read(var Buffer; const Count: NativeUInt);
+{$ifdef CPUARM}
+var
+  P: PByte;
+begin
+  P := Current;
+  Inc(P, Count);
+
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
+  begin
+    DifficultRead(@Buffer, Count);
+  end else
+  begin
+    Current := P;
+    Dec(P, Count);
+    NcMove(P^, Buffer, Count);
+  end;
+end;
+{$else .CPUINTEL}
+asm
+  {$ifdef CPUX86}
+    xchg eax, ebx
+    push eax
+    mov eax, ecx
+    add eax, [EBX].TCachedReader.Current
+    cmp eax, [EBX].TCachedReader.FOverflow
+    ja @Difficult
+
+    mov [EBX].TCachedReader.Current, eax
+    sub eax, ecx
+    jmp NcMoveInternal
+  {$else .CPUX64}
+    mov rax, rcx
+    mov rcx, r8
+    add rcx, [RAX].TCachedReader.Current
+    cmp rcx, [RAX].TCachedReader.FOverflow
+    ja @Difficult
+
+    mov [RAX].TCachedReader.Current, rcx
+    sub rcx, r8
+    jmp NcMove
+  {$endif}
+
+@Difficult:
+  {$ifdef CPUX86}
+    xchg eax, ebx
+    pop ebx
+  {$else .CPUX64}
+    xchg rax, rcx
+  {$endif}
+  jmp DifficultRead
+end;
+{$endif}
+
 
 {$ifdef CPUARM}
 // System memcpy recall
@@ -2168,100 +2435,79 @@ end;
 
 { TCachedReader }
 
-constructor TCachedReader.Create(const Callback: TCachedReaderCallback;
+constructor TCachedReader.Create(const FlushCallback: TCachedBufferFlushCallback;
   const BufferSize: NativeUInt);
 begin
-  inherited Create(True, TMethod(Callback), BufferSize);
-end;
-
-procedure TCachedReader.DoFlush;
-var
-  FilledSize, Margin: NativeUInt;
-  Handle: Pointer;
-  Temp: TCachedBufferMemory;
-begin
-  Margin := NativeUInt(Self.Overflow) - NativeUInt(Self.Current); //todo Self.Margin;
-
-  // ignore overflows
-  if (NativeInt(Margin) < 0) then
-  begin
-    Self.Current := Self.Overflow;
-    Margin := 0;
-  end;
-
-  // move margin data to previous memory
-  if (Margin > 0) then
-  begin
-    if (Margin > FMemory.PreviousSize) then
-    begin
-      Temp := CachedBufferMemory(Margin, FMemory.BufferSize);
-      Handle := FMemory.Handle;
-      try
-        NcMove(Pointer(NativeUInt(FMemory.Buffer)+FMemory.BufferSize-Margin)^,
-               Pointer(NativeUInt(Temp.Buffer)-Margin)^, Margin);
-        FMemory := Temp;
-      finally
-        FreeMem(Handle);
-      end;
-    end else
-    begin
-      NcMove(Pointer(NativeUInt(FMemory.Buffer)+FMemory.BufferSize-Margin)^,
-             Pointer(NativeUInt(FMemory.Buffer)-Margin)^, Margin);
-    end;
-  end;
-
-  // run callback
-  FilledSize := TCachedReaderCallback(FCallback)(Self, FMemory.Buffer, FMemory.BufferSize);
-  if (FilledSize <> FMemory.BufferSize) then FIsFinishing := True;
-
-  // fill Current and Overflow
-  Current := Pointer(NativeUInt(FMemory.Buffer) - Margin{>=0});
-  FOverflow := Pointer(NativeUInt(FMemory.Buffer) + FilledSize);
-end;
-
-procedure TCachedReader.RaiseFinishedReading();
-begin
-  RaiseFinishing('read data');
+  inherited Create(True, FlushCallback, BufferSize);
 end;
 
 // Margin < Count
 procedure TCachedReader.DifficultRead(Buffer: PByte; Count: NativeUInt);
 var
   S: NativeUInt;
-  Margin: NativeInt;
+  Margin: NativeUInt;
 begin
-  if (FIsFinishing) then RaiseFinishedReading();
+  // last time failure reading
+  if (NativeUInt(Current) > NativeUInt(FOverflow)) then
+    RaiseReading;
+
+  // limit test
+  if (FLimited) and (Self.Position + Count > FLimit) then
+    RaiseReading;
 
   // read Margin
-  Margin := NativeInt(Self.Overflow) - NativeInt(Self.Current);
-  if (Margin > 0) then
+  if (Current <> FOverflow) then
   begin
+    Margin := Self.Margin;
+
     NcMove(Current^, Buffer^, Margin);
-    Inc(NativeInt(Buffer), Margin);
-    Inc(NativeInt(Current), Margin);
-    Dec(NativeInt(Count), Margin);
+    Inc(Buffer, Margin);
+    Inc(Current, Margin);
+    Dec(Count, Margin);
+
+    Flush;
+    if (FReaderFinishing) and (NativeUInt(Self.Margin) < Count) then
+      RaiseReading;
   end;
 
-  // if read data is too large, we can run reader callback directly
+  // if read data is too large, we can read data directly
   if (Count >= FMemory.BufferSize) then
   begin
     S := Count - (Count mod FMemory.BufferSize);
-    if (S <> TCachedReaderCallback(FCallback)(Self, Buffer, S)) then RaiseFinishedReading();
-
-    Inc(NativeUInt(Buffer), S);
     Dec(Count, S);
-    Inc(FFlushedPosition, S);
+
+    if (Self.ProgressUsed) then
+    begin
+      while (S <> 0) do
+      begin
+        if (FMemory.BufferSize <> FFlushCallback(Self, Buffer, FMemory.BufferSize)) then
+          RaiseReading;
+
+        Dec(S, FMemory.BufferSize);
+        Inc(Buffer, FMemory.BufferSize);
+        DoProgress;
+        Inc(FPositionBase, FMemory.BufferSize);
+
+        if (FFinished) and ((S <> 0) or (Count <> 0)) then
+          RaiseReading;
+      end;
+    end else
+    begin
+      if (S <> FFlushCallback(Self, Buffer, S)) then
+        RaiseReading;
+
+      Inc(Buffer, S);
+      Inc(FPositionBase, S);
+    end;
   end;
 
   // last Buffer bytes
   if (Count <> 0) then
   begin
-    Flush();
-    Margin := NativeInt(Self.Overflow) - NativeInt(Self.Current);
-    if (NativeUInt(Margin) < Count) then RaiseFinishedReading();
+    if (NativeUInt(Self.Margin) < Count) then RaiseReading;
 
     NcMove(Current^, Buffer^, Count);
-    Inc(NativeUInt(Current), Count);
+    Inc(Current, Count);
   end;
 end;
 
@@ -2271,7 +2517,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2289,7 +2535,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2307,7 +2553,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2324,7 +2570,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2341,7 +2587,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2358,7 +2604,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2375,7 +2621,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2392,7 +2638,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2409,7 +2655,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2426,7 +2672,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2444,7 +2690,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2462,7 +2708,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2479,7 +2725,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2496,7 +2742,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2513,7 +2759,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2530,7 +2776,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2547,7 +2793,7 @@ var
 begin
   P := Pointer(Current);
   Inc(P);
-  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
     DifficultRead(Pointer(@Value), SizeOf(Value));
   end else
@@ -2567,7 +2813,7 @@ begin
   P := Current;
   if (NativeUInt(P) >= NativeUInt(Self.Overflow)) then
   begin
-    if (Flush < SizeOf(Byte)) then RaiseFinishedReading;
+    if (Flush < SizeOf(Byte)) then RaiseReading;
     P := Current;
   end;
 
@@ -2735,58 +2981,28 @@ end;
 
 { TCachedWriter }
 
-constructor TCachedWriter.Create(const Callback: TCachedWriterCallback;
+constructor TCachedWriter.Create(const FlushCallback: TCachedBufferFlushCallback;
   const BufferSize: NativeUInt);
 begin
-  inherited Create(False, TMethod(Callback), BufferSize);
+  inherited Create(False, FlushCallback, BufferSize);
 end;
 
-procedure TCachedWriter.DoFlush;
-var
-  Size: NativeUInt;
-  Margin: NativeInt;
-begin
-  Size := FMemory.BufferSize;
-
-  // finishing
-  Margin := NativeInt(Self.Overflow) - NativeInt(Self.Current); // todo Self.Margin
-  if (Margin > 0) then
-  begin
-    Dec(Size, Margin);
-    FIsFinishing := True;
-    Margin := 0;
-    if (Size = 0) then Exit;
-  end;
-
-  // run callback
-  if (Size <> TCachedWriterCallback(FCallback)(Self, FMemory.Buffer, Size)) then
-  RaiseReadWrite(Size);
-
-  // copy margin (if needed)
-  if (Margin < 0) then
-  begin
-    NcMove(Pointer(NativeUInt(FMemory.Buffer)+FMemory.BufferSize)^,
-           FMemory.Buffer^, -Margin);
-  end;
-
-  // fill Current and Overflow
-  Current := Pointer(NativeInt(FMemory.Buffer) - Margin{<=0});
-  FOverflow := Pointer(NativeUInt(FMemory.Buffer) + FMemory.BufferSize);
-end;
-
-// Count > Margin
+// Margin < Count
 procedure TCachedWriter.DifficultWrite(Buffer: PByte; Count: NativeUInt);
 var
   S: NativeUInt;
   Margin: NativeInt;
 begin
-  // write Margin
+  // limit test
+  if (FLimited) and (Self.Position + Count > FLimit) then
+    RaiseWriting;
+
+  // write margin to Buffer if used
   if (Current <> FMemory.Buffer) then
   begin
-    Margin := NativeInt(Self.Overflow) - NativeInt(Self.Current);
-
-    if (Margin > 0) then
+    if (NativeUInt(Current) < NativeUInt(FOverflow)) then
     begin
+      Margin := Self.Margin;
       NcMove(Buffer^, Current^, Margin);
 
       Current := Self.Overflow;
@@ -2797,15 +3013,35 @@ begin
     Flush();
   end;
 
-  // if written data is too large, we can run writer callback directly
+  // if written data is too large, we can write data directly
   if (Count >= FMemory.BufferSize) then
   begin
     S := Count - (Count mod FMemory.BufferSize);
-    if (S <> TCachedWriterCallback(FCallback)(Self, Buffer, S)) then RaiseReadWrite(S);
-
-    Inc(Buffer, S);
     Dec(Count, S);
-    Inc(FFlushedPosition, S);
+
+    if (Self.ProgressUsed) then
+    begin
+      while (S <> 0) do
+      begin
+        if (FMemory.BufferSize <> FFlushCallback(Self, Buffer, FMemory.BufferSize)) then
+          RaiseWriting;
+
+        Dec(S, FMemory.BufferSize);
+        Inc(Buffer, FMemory.BufferSize);
+        DoProgress;
+        Inc(FPositionBase, FMemory.BufferSize);
+
+        if (FFinished) and ((S <> 0) or (Count <> 0)) then
+          RaiseWriting;
+      end;
+    end else
+    begin
+      if (S <> FFlushCallback(Self, Buffer, S)) then
+        RaiseWriting;
+
+      Inc(Buffer, S);
+      Inc(FPositionBase, S);
+    end;
   end;
 
   // last Buffer bytes
@@ -3164,7 +3400,7 @@ begin
   if (IsDirect) then
   begin
     Self.CopyParameters(Source);
-    TCachedReaderCallback(Self.FCallback) := Self.InternalCallback;
+    Self.FFlushCallback := Self.InternalCallback;
   end else
   begin
     inherited Create(InternalCallback, BufferSize);
@@ -3183,13 +3419,13 @@ begin
   if (IsOwner) then FSource.Free;
 end;
 
-function TCachedReReader.InternalCallback(Sender: TCachedReader; Buffer: PByte;
+function TCachedReReader.InternalCallback(Sender: TCachedBuffer; Buffer: PByte;
   BufferSize: NativeUInt): NativeUInt;
 begin
   if (IsDirect) then
   begin
     Source.CopyParameters(Self);
-    Result := TCachedReaderCallback(Source.FCallback)(Source, {FMemory.}Buffer, {FMemory.}BufferSize);
+    Result := Source.FFlushCallback(Source, {FMemory.}Buffer, {FMemory.}BufferSize);
   end else
   begin
     Result := FReCallback(Self, Buffer, BufferSize, Source);
@@ -3211,7 +3447,7 @@ begin
   if (IsDirect) then
   begin
     Self.CopyParameters(Destination);
-    TCachedWriterCallback(Self.FCallback) := Self.InternalCallback;
+    Self.FFlushCallback := Self.InternalCallback;
   end else
   begin
     inherited Create(InternalCallback, BufferSize);
@@ -3230,13 +3466,13 @@ begin
   if (IsOwner) then FDestination.Free;
 end;
 
-function TCachedReWriter.InternalCallback(Sender: TCachedWriter;
+function TCachedReWriter.InternalCallback(Sender: TCachedBuffer;
   Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
 begin
   if (IsDirect) then
   begin
     Destination.CopyParameters(Self);
-    Result := TCachedWriterCallback(Destination.FCallback)(Destination, {FMemory.}Buffer, {FMemory.}BufferSize);
+    Result := Destination.FFlushCallback(Destination, {FMemory.}Buffer, {FMemory.}BufferSize);
   end else
   begin
     Result := FReCallback(Self, Buffer, BufferSize, Destination);
@@ -3283,7 +3519,7 @@ begin
   inherited Create(InternalCallback, BufferSize);
 end;
 
-function TCachedFileReader.InternalCallback(Sender: TCachedReader;
+function TCachedFileReader.InternalCallback(Sender: TCachedBuffer;
   Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
 var
   I, Size: Integer;
@@ -3345,7 +3581,7 @@ begin
   inherited Create(InternalCallback, BufferSize);
 end;
 
-function TCachedFileWriter.InternalCallback(Sender: TCachedWriter;
+function TCachedFileWriter.InternalCallback(Sender: TCachedBuffer;
   Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
 var
   I, Size: Integer;
@@ -3388,7 +3624,7 @@ begin
   begin
     // inherited Create;
     FIsReader := True;
-    FIsFinishing := True;
+    FFinished := True;
   end else
   begin
     BufferSize := 0;
@@ -3398,7 +3634,7 @@ begin
   end;
 end;
 
-function TCachedMemoryReader.InternalCallback(Sender: TCachedReader;
+function TCachedMemoryReader.InternalCallback(Sender: TCachedBuffer;
   Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
 begin
   Result := BufferSize;
@@ -3424,7 +3660,7 @@ begin
   begin
     // inherited Create;
     FIsReader := False;
-    FIsFinishing := True;
+    FFinished := True;
   end else
   begin
     BufferSize := 0;
@@ -3434,7 +3670,7 @@ begin
   end;
 end;
 
-function TCachedMemoryWriter.InternalCallback(Sender: TCachedWriter;
+function TCachedMemoryWriter.InternalCallback(Sender: TCachedBuffer;
   Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
 begin
   Result := BufferSize;
@@ -3502,7 +3738,7 @@ end;
 
 
 initialization
-  FindStringResource(0);
-//  TCachedReader(nil).ReadData(PByte(nil)^);
+   
+  
 
 end.
