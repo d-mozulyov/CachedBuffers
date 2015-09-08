@@ -49,7 +49,7 @@ unit CachedBuffers;
   {$define INLINESUPPORT}
 {$ifend}
 {$if Defined(CPUX86) or Defined(CPUX64)}
-   {$define CPUINTEL}
+  {$define CPUINTEL}
 {$ifend}
 {$if SizeOf(Pointer) = 8}
   {$define LARGEINT}
@@ -77,13 +77,6 @@ interface
        {$else}
          SysUtils
        {$endif};
-
-const
-  DEFAULT_CACHED_SIZE = 64*1024;
-
-  soFromBeginning = 0;
-  soFromCurrent = 1;
-  soFromEnd = 2;
 
 type
   // standard types
@@ -124,56 +117,46 @@ type
 
 { TCachedBuffer abstract class }
 
+  TCachedBufferKind = (cbReader, cbWriter);
   TCachedBuffer = class;
-  TCachedBufferFlushCallback = function(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt of object;
-  TCachedBufferProgressEvent = procedure(Sender: TCachedBuffer; var Cancel: Boolean) of object;
+  TCachedBufferCallback = function(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt of object;
+  TCachedBufferProgress = procedure(Sender: TCachedBuffer; var Cancel: Boolean) of object;
 
   TCachedBufferMemory = record
     Handle: Pointer;
-    PreviousSize: NativeUInt;   // 0..inf = Handle..Buffer
-      Buffer: Pointer;
-      BufferSize: NativeUInt;
-    AdditionalSize: NativeUInt; // bonus memory after "Buffer+BufferSize", 4kb minimum
+    PreviousSize: NativeUInt;   
+      Data: Pointer;
+      Size: NativeUInt;
+    Additional: Pointer;
+    AdditionalSize: NativeUInt;  
   end;
   PCachedBufferMemory = ^TCachedBufferMemory;
-           {$message 'проработать всё! Position, Seek, Size, ошибки!!!'}
 
   TCachedBuffer = class(TObject)
   protected
-    FIsReader: Boolean;
-    FReaderFinishing: Boolean;
-    FFinished: Boolean;
-    FSeekable: Boolean;
+    FMemory: TCachedBufferMemory;
+    FKind: TCachedBufferKind;
+    FFinishing: Boolean;
+    FEOF: Boolean;
     FLimited: Boolean;
-
-    FReserved1: Boolean;
-    FReserved2: Boolean;
-  protected
     FPositionBase: Int64;
     FLimit: Int64;
-    FMemory: TCachedBufferMemory;
     FStart: PByte;
     FOverflow: PByte;
     FHighWritten: PByte;
-    FFlushCallback: TCachedBufferFlushCallback;
-    FOnProgress: TCachedBufferProgressEvent;
+    FCallback: TCachedBufferCallback;
+    FOnProgress: TCachedBufferProgress;
 
     function GetMargin: NativeInt; {$ifdef INLINESUPPORT}inline;{$endif}
     function GetPosition: Int64; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure SetEOF(const Value: Boolean);
     procedure SetLimit(const Value: Int64);
-    procedure SetPosition(const Value: Int64);
-    function ProgressUsed: Boolean;
-
     function DoWriterFlush: Boolean;
     function DoReaderFlush: Boolean;
     function DoProgress: Boolean;
-    function Progress: Boolean; virtual;
     function CheckLimit(const Value: Int64): Boolean; virtual;
-  private
-    procedure SetFinished(const Value: Boolean);
   protected
-    constructor Create(const IsReader: Boolean; const FlushCallback: TCachedBufferFlushCallback; const BufferSize: NativeUInt = 0);
-    procedure CopyParameters(const Source: TCachedBuffer);
+    constructor Create(const Kind: TCachedBufferKind; const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
@@ -182,23 +165,17 @@ type
     procedure AfterConstruction; override;
     procedure BeforeDestruction; override;
   public
-    // basic interface
     Current: PByte;
     function Flush: NativeUInt;
+    property Kind: TCachedBufferKind read FKind;
     property Overflow: PByte read FOverflow;
     property Margin: NativeInt read GetMargin;
-    property EOF: Boolean read FFinished write SetFinished;
-    property Memory: TCachedBufferMemory read FMemory;
-    property OnProgress: TCachedBufferProgressEvent read FOnProgress write FOnProgress;
-  public
-    // position and size
-    procedure Seek(const Offset: NativeInt); overload;
-    function Seek(const Offset: Int64; const Origin: Word): Int64; overload;
-
-    property Position: Int64 read GetPosition write SetPosition;
-    property Seekable: Boolean read FSeekable;
+    property EOF: Boolean read FEOF write SetEOF;
     property Limited: Boolean read FLimited;
     property Limit: Int64 read FLimit write SetLimit;
+    property Memory: TCachedBufferMemory read FMemory;
+    property Position: Int64 read GetPosition;
+    property OnProgress: TCachedBufferProgress read FOnProgress write FOnProgress;
   end;
 
 { TCachedReader class }
@@ -208,9 +185,9 @@ type
     function DoDirectRead(const Position: Int64; var Buffer; const Count: NativeUInt): Boolean;
     procedure DifficultRead(Buffer: PByte; Count: NativeUInt);
   public
-    constructor Create(const FlushCallback: TCachedBufferFlushCallback; const BufferSize: NativeUInt = 0);
+    constructor Create(const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
     procedure DirectRead(const Position: Int64; var Buffer; const Count: NativeUInt);
-    property Finishing: Boolean read FReaderFinishing;
+    property Finishing: Boolean read FFinishing;
 
     // TStream-like data reading
     procedure Read(var Buffer; const Count: NativeUInt);
@@ -255,7 +232,7 @@ type
     function DoDirectWrite(const Position: Int64; const Buffer; const Count: NativeUInt): Boolean;
     procedure DifficultWrite(Buffer: PByte; Count: NativeUInt);
   public
-    constructor Create(const FlushCallback: TCachedBufferFlushCallback; const BufferSize: NativeUInt = 0);
+    constructor Create(const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
     procedure DirectWrite(const Position: Int64; const Buffer; const Count: NativeUInt);
 
     // TStream-like data writing
@@ -296,54 +273,36 @@ type
 
 { TCachedReReader class }
 
-  TCachedReReader = class;
-  TCachedReReaderCallback = function(Sender: TCachedReReader; Buffer: PByte;
-    BufferSize: NativeUInt; Source: TCachedReader): NativeUInt of object;
-
   TCachedReReader = class(TCachedReader)
-  private
-    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
   protected
     FSource: TCachedReader;
-    FReCallback: TCachedReReaderCallback;
-
-    function GetIsDirect: Boolean; virtual;
+    FOwner: Boolean;
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
     destructor Destroy; override;
   public
-    constructor Create(const Callback: TCachedReReaderCallback; const Source: TCachedReader; const IsOwner: Boolean = False; const BufferSize: NativeUInt = 0); reintroduce;
+    constructor Create(const Callback: TCachedBufferCallback; const Source: TCachedReader; const Owner: Boolean = False; const BufferSize: NativeUInt = 0);
 
-    property IsOwner: Boolean read FReserved1 write FReserved1;
-    property IsDirect: Boolean read FReserved2;
     property Source: TCachedReader read FSource;
+    property Owner: Boolean read FOwner write FOwner;
   end;
 
 { TCachedReWriter class }
 
-  TCachedReWriter = class;
-  TCachedReWriterCallback = function(Sender: TCachedReWriter; Buffer: PByte;
-    BufferSize: NativeUInt; Destination: TCachedWriter): NativeUInt of object;
-
   TCachedReWriter = class(TCachedWriter)
-  private
-    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
   protected
-    FDestination: TCachedWriter;
-    FReCallback: TCachedReWriterCallback;
-
-    function GetIsDirect: Boolean; virtual;
+    FTarget: TCachedWriter;
+    FOwner: Boolean;
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
     destructor Destroy; override;
   public
-    constructor Create(const Callback: TCachedReWriterCallback; const Destination: TCachedWriter; const IsOwner: Boolean = False; const BufferSize: NativeUInt = 0); reintroduce;
+    constructor Create(const Callback: TCachedBufferCallback; const Target: TCachedWriter; const Owner: Boolean = False; const BufferSize: NativeUInt = 0);
 
-    property IsOwner: Boolean read FReserved1 write FReserved1;
-    property IsDirect{Wrapper}: Boolean read FReserved2;
-    property Destination: TCachedWriter read FDestination;
+    property Target: TCachedWriter read FTarget;
+    property Owner: Boolean read FOwner write FOwner;
   end;
 
 
@@ -353,43 +312,39 @@ type
   private
   protected
     FHandle: THandle;
-    FLimitSize: Int64;
+    FHandleOwner: Boolean;
 
-    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
     destructor Destroy; override;
   public
-    constructor Create(const FileName: string; const Offset: Int64 = 0; const LimitSize: Int64 = 0); overload;
-    constructor Create(const Handle: THandle; const LimitSize: Int64 = 0; const HandleOwner: Boolean = True); overload;
+    constructor Create(const FileName: string; const Offset: Int64 = 0; const Size: Int64 = 0);
+    constructor CreateHandled(const Handle: THandle; const Size: Int64 = 0; const HandleOwner: Boolean = False);
 
     property Handle: THandle read FHandle;
-    property IsHandleOwner: Boolean read FReserved1 write FReserved1;
-    property Limited: Boolean read FReserved2;
-    property LimitSize: Int64 read FLimitSize;
+    property HandleOwner: Boolean read FHandleOwner write FHandleOwner;
   end;
 
 { TCachedFileWriter class }
 
   TCachedFileWriter = class(TCachedWriter)
-  private
   protected
     FHandle: THandle;
-    FLimitSize: Int64;
+    FHandleOwner: Boolean;
 
-    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
     destructor Destroy; override;
   public
-    constructor Create(const FileName: string); overload;
-    constructor Create(const Handle: THandle; const LimitSize: Int64 = 0; const HandleOwner: Boolean = True); overload;
+    constructor Create(const FileName: string; const Size: Int64 = 0);
+    constructor CreateHandled(const Handle: THandle; const Size: Int64 = 0; const HandleOwner: Boolean = False);
 
     property Handle: THandle read FHandle;
-    property IsHandleOwner: Boolean read FReserved1 write FReserved1;
-    property Limited: Boolean read FReserved2;
+    property HandleOwner: Boolean read FHandleOwner write FHandleOwner;
   end;
 
 
@@ -397,24 +352,33 @@ type
 
   TCachedMemoryReader = class(TCachedReader)
   protected
-    FPtr: PByte;
-    FPtrMargin: NativeUInt;
+    FPtr: Pointer;
+//    FPtrMargin: NativeUInt;
 
-    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
   public
     constructor Create(const Ptr: Pointer; const Size: NativeUInt);
+    property Ptr: Pointer read FPtr;
   end;
 
 { TCachedMemoryWriter class }
 
   TCachedMemoryWriter = class(TCachedWriter)
   protected
-    FPtr: PByte;
-    FPtrMargin: NativeUInt;
+    FTemporary: Boolean;
+    FPtr: Pointer;
+//    FPtrMargin: NativeUInt;
 
-    function InternalCallback(Sender: TCachedBuffer; Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+    function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
+  {$ifNdef AUTOREFCOUNT}
+  public
+  {$endif}
+    destructor Destroy; override;
   public
     constructor Create(const Ptr: Pointer; const Size: NativeUInt);
+    constructor CreateTemporary;
+    property Temporary: Boolean read FTemporary;
+    property Ptr: Pointer read FPtr;
   end;
 
 { TCachedResourceReader class }
@@ -549,6 +513,7 @@ procedure NcMove(const Source; var Dest; const Size: NativeUInt); {$ifdef CPUARM
 
 implementation
 
+
 procedure RaisePointers;
 begin
   raise ECachedBuffer.Create('Invalid current, overflow or buffer pointers value');
@@ -655,6 +620,7 @@ end;
 
 const
   MEMORY_PAGE_SIZE = 4 * 1024;
+  DEFAULT_CACHED_SIZE = 64*1024;
 
 function CachedBufferMemory(const PreviousSize, BufferSize: NativeUInt): TCachedBufferMemory;
 var
@@ -663,18 +629,19 @@ begin
   // detect sizes
   Result.PreviousSize := (PreviousSize + MEMORY_PAGE_SIZE-1) and -MEMORY_PAGE_SIZE;
   Result.AdditionalSize := MEMORY_PAGE_SIZE;
-  if (BufferSize = 0) then Result.BufferSize := DEFAULT_CACHED_SIZE;
-  Result.BufferSize := (BufferSize + MEMORY_PAGE_SIZE-1) and -MEMORY_PAGE_SIZE;
+  if (BufferSize = 0) then Result.Size := DEFAULT_CACHED_SIZE;
+  Result.Size := (BufferSize + MEMORY_PAGE_SIZE-1) and -MEMORY_PAGE_SIZE;
 
   // allocate
-  GetMem(Result.Handle, Result.PreviousSize + Result.BufferSize +
+  GetMem(Result.Handle, Result.PreviousSize + Result.Size +
                         Result.AdditionalSize + MEMORY_PAGE_SIZE);
 
   // align
   Offset := NativeUInt(Result.Handle) and (MEMORY_PAGE_SIZE-1);
   Inc(Result.PreviousSize, MEMORY_PAGE_SIZE-Offset);
   Inc(Result.AdditionalSize, Offset);
-  Result.Buffer := Pointer(NativeUInt(Result.Handle) + Result.PreviousSize);
+  Result.Data := Pointer(NativeUInt(Result.Handle) + Result.PreviousSize);
+  Result.Additional := Pointer(NativeUInt(Result.Data) + Result.Size);
 end;
 
 
@@ -749,12 +716,12 @@ begin
 
   if (FMode = cbWriter) then
   begin
-    Current := FMemory.Buffer;
-    Margin := FMemory.BufferSize;
+    Current := FMemory.Data;
+    Margin := FMemory.Size;
   end else
   // if (FMode = cbReader) then
   begin
-    Current := pointer(NativeInt(FMemory.Buffer)+FMemory.BufferSize);
+    Current := pointer(NativeInt(FMemory.Data)+FMemory.Size);
     Margin := 0;
     Flush();
   end;
@@ -771,12 +738,12 @@ end;
 function TCustomCachedBuffer.GetPosition: int64;
 begin
   // FFlushCount for writing and (FFlushCount - 1) for reading
-  Result := (int64(FFlushCount+dword(ord(FMode))-1)*FMemory.BufferSize) + (integer(Current)-integer(FMemory.Buffer));
+  Result := (int64(FFlushCount+dword(ord(FMode))-1)*FMemory.Size) + (integer(Current)-integer(FMemory.Data));
 end;
 
 procedure TCustomCachedBuffer.FlushWriter();
 begin
-  FMemory.FilledSize := FMemory.BufferSize;
+  FMemory.FilledSize := FMemory.Size;
 
   // if last
   if (Margin > 0) then
@@ -789,7 +756,7 @@ begin
 
   begin
     // run Callback
-    if (Self.FMemory.FilledSize <> Callback(@Self, Self.FMemory.Buffer, Self.FMemory.FilledSize)) then
+    if (Self.FMemory.FilledSize <> Callback(@Self, Self.FMemory.Data, Self.FMemory.FilledSize)) then
     RaiseCannotReadWrite(cbWriter, Self.FMemory.FilledSize);
 
     // copy margin (if needed)
@@ -798,8 +765,8 @@ begin
   end;
 
   // fill Current and Margin
-  Current := Pointer(NativeInt(FMemory.Buffer) - Margin{<=0});
-  Margin := FMemory.BufferSize + Margin{<=0};
+  Current := Pointer(NativeInt(FMemory.Data) - Margin{<=0});
+  Margin := FMemory.Size + Margin{<=0};
 end;
 
 procedure TCustomCachedBuffer.FlushReader();
@@ -809,12 +776,12 @@ begin
   // simple mode
   begin
     if (Margin > 0) then CachedBufferMemoryCopyReaderOffset(Self.FMemory, Self.FMemory, Margin);
-    Self.FMemory.FilledSize := Callback(@Self, Self.FMemory.Buffer, Self.FMemory.BufferSize);
-    if (Self.FMemory.BufferSize <> Self.FMemory.FilledSize) then FFinishing := true;
+    Self.FMemory.FilledSize := Callback(@Self, Self.FMemory.Data, Self.FMemory.Size);
+    if (Self.FMemory.Size <> Self.FMemory.FilledSize) then FFinishing := true;
   end;
 
   // fill Current and Margin
-  Current := Pointer(NativeInt(FMemory.Buffer) - Margin{>=0});
+  Current := Pointer(NativeInt(FMemory.Data) - Margin{>=0});
   Margin := FMemory.FilledSize + Margin{>=0};
 end;
 
@@ -846,7 +813,7 @@ var
   C, S: integer;
 begin
   // write to buffer's end and Flush
-  if (Current <> FMemory.Buffer) or (FFlushCount = 0) then
+  if (Current <> FMemory.Data) or (FFlushCount = 0) then
   begin
     if (Margin > 0) then
     begin
@@ -863,11 +830,11 @@ begin
 
   // if written data is too large, we can call writer
   // withvar memory buffer using
-  if (Size >= FMemory.BufferSize) then
+  if (Size >= FMemory.Size) then
   begin
     if (FThread <> nil) then FThread.Wait();
-    C := Size div FMemory.BufferSize;
-    S := C * FMemory.BufferSize;
+    C := Size div FMemory.Size;
+    S := C * FMemory.Size;
 
     if (FThread <> nil) then
     begin
@@ -1136,20 +1103,20 @@ begin
   end else
   // difficult non-buffered case!
   begin
-    Count := (Size+Memory.BufferSize-1) div Memory.BufferSize;
+    Count := (Size+Memory.Size-1) div Memory.Size;
 
     for i := 0 to Count-2 do
     begin
-      Move(Data^, Memory.Buffer^, Memory.BufferSize);
-      Windows.WriteFile(FFile, Memory.Buffer^, Memory.BufferSize, fake, @F.Struct);
-      if (OverlappedWait() <> Memory.BufferSize) then RaiseLastOSError();
+      Move(Data^, Memory.Data^, Memory.Size);
+      Windows.WriteFile(FFile, Memory.Data^, Memory.Size, fake, @F.Struct);
+      if (OverlappedWait() <> Memory.Size) then RaiseLastOSError();
 
-      inc(NativeInt(Data), Memory.BufferSize);
-      dec(Size, Memory.BufferSize);
+      inc(NativeInt(Data), Memory.Size);
+      dec(Size, Memory.Size);
     end;
 
-    Move(Data^, Memory.Buffer^, Size);
-    Windows.WriteFile(FFile, Memory.Buffer^, Size, fake, @F.Struct);
+    Move(Data^, Memory.Data^, Size);
+    Windows.WriteFile(FFile, Memory.Data^, Size, fake, @F.Struct);
   end;
 end;
 
@@ -1160,7 +1127,7 @@ var
 
   procedure RaiseReading;
   begin
-    RaiseCannotReadWrite(cbReader, Count*Memory.BufferSize + (Size mod Memory.BufferSize));
+    RaiseCannotReadWrite(cbReader, Count*Memory.Size + (Size mod Memory.Size));
   end;
 begin
   inherited;
@@ -1171,21 +1138,21 @@ begin
   end else
   // difficult non-buffered case!
   begin
-    Count := (Size+Memory.BufferSize-1) div Memory.BufferSize;
+    Count := (Size+Memory.Size-1) div Memory.Size;
 
     for i := 0 to Count-2 do
     begin
-      Windows.ReadFile(FFile, Memory.Buffer^, Memory.BufferSize, fake, @F.Struct);
-      if (OverlappedWait() <> Memory.BufferSize) then RaiseReading;
-      Move(Memory.Buffer^, Data^, Memory.BufferSize);
+      Windows.ReadFile(FFile, Memory.Data^, Memory.Size, fake, @F.Struct);
+      if (OverlappedWait() <> Memory.Size) then RaiseReading;
+      Move(Memory.Data^, Data^, Memory.Size);
 
-      inc(NativeInt(Data), Memory.BufferSize);
-      dec(Size, Memory.BufferSize);
+      inc(NativeInt(Data), Memory.Size);
+      dec(Size, Memory.Size);
     end;
 
-    Windows.ReadFile(FFile, Memory.Buffer^, Size, fake, @F.Struct);
-    if (OverlappedWait() <> Memory.BufferSize) then RaiseReading;
-    Move(Memory.Buffer^, Data^, Size);
+    Windows.ReadFile(FFile, Memory.Data^, Size, fake, @F.Struct);
+    if (OverlappedWait() <> Memory.Size) then RaiseReading;
+    Move(Memory.Data^, Data^, Size);
 
     RunningSize := 0;
   end;
@@ -1295,22 +1262,22 @@ begin
 
   // if read data is too large, we can call reader callback
   // withvar memory buffer using
-  if (Size >= FMemory.BufferSize) then
+  if (Size >= FMemory.Size) then
   begin
     if (FThread <> nil) then
     begin
-      if (FMemory.BufferSize <> FThread.Wait()) then RaiseFinishedReading();
+      if (FMemory.Size <> FThread.Wait()) then RaiseFinishedReading();
       inc(FFlushCount);
-      Move(FThread.FMemory.Buffer^, Data^, FMemory.BufferSize);
-      Inc(NativeInt(Data), FMemory.BufferSize);
-      Dec(Size, FMemory.BufferSize);
+      Move(FThread.FMemory.Data^, Data^, FMemory.Size);
+      Inc(NativeInt(Data), FMemory.Size);
+      Dec(Size, FMemory.Size);
       if (assigned(FOnProgress)) then FOnProgress(@Self);
     end;
 
-    if (Size >= FMemory.BufferSize) then
+    if (Size >= FMemory.Size) then
     begin
-      C := Size div FMemory.BufferSize;
-      S := C * FMemory.BufferSize;
+      C := Size div FMemory.Size;
+      S := C * FMemory.Size;
 
       if (FThread <> nil) then
       begin
@@ -1570,28 +1537,28 @@ end;
 
 { TCachedBuffer }
 
-constructor TCachedBuffer.Create(const IsReader: Boolean;
-  const FlushCallback: TCachedBufferFlushCallback; const BufferSize: NativeUInt);
+constructor TCachedBuffer.Create(const Kind: TCachedBufferKind;
+  const Callback: TCachedBufferCallback; const BufferSize: NativeUInt);
 begin
   inherited Create;
-  FIsReader := IsReader;
-  FFlushCallback := FlushCallback;
-  if (not Assigned(FFlushCallback)) then
+  FKind := Kind;
+  FCallback := Callback;
+  if (not Assigned(FCallback)) then
     raise ECachedBuffer.Create('Flush callback not defined');
 
-  FMemory := CachedBufferMemory(Ord(IsReader){4kb}, BufferSize);
-  FStart := FMemory.Buffer;
+  FMemory := CachedBufferMemory(Ord(Kind = cbReader){4kb}, BufferSize);
+  FStart := FMemory.Data;
   FHighWritten := FStart;
-  FOverflow := Pointer(NativeUInt(FMemory.Buffer) + FMemory.BufferSize);
-  
-  if (not FIsReader) then
+  FOverflow := Pointer(NativeUInt(FMemory.Data) + FMemory.Size);
+
+  if (Kind = cbWriter) then
   begin
-    Current := FMemory.Buffer;
+    Current := FMemory.Data;
   end else
   begin
     FStart := FOverflow;
     Current := FOverflow;
-    FPositionBase := -Int64(FMemory.BufferSize);
+    FPositionBase := -Int64(FMemory.Size);
   end;
 end;
 
@@ -1603,7 +1570,7 @@ end;
 
 procedure TCachedBuffer.BeforeDestruction;
 begin
-  if (not FIsReader) and (not FFinished) and (Assigned(FFlushCallback)) then
+  if (Kind = cbWriter) and (not FEOF) and (Assigned(FCallback)) then
     Flush;
 
   inherited;
@@ -1617,54 +1584,37 @@ begin
   inherited;
 end;
 
-procedure TCachedBuffer.SetFinished(const Value{True}: Boolean);
+procedure TCachedBuffer.SetEOF(const Value{True}: Boolean);
 begin
-  if (FFinished = Value) then Exit;
+  if (FEOF = Value) then Exit;
   if (not Value) then
     raise ECachedBuffer.Create('Can''t unfinish cached buffer');
 
-  FFinished := True;
-  FReaderFinishing := FIsReader;
+  FEOF := True;
+  FFinishing := (Kind = cbReader);
   FLimited := True;
   FLimit := Self.Position;
   FStart := Current;
   FOverflow := Current;
 end;
 
-function TCachedBuffer.Progress: Boolean;
+function TCachedBuffer.DoProgress: Boolean;
 var
   Cancel: Boolean;
 begin
-  Cancel := FFinished;
+  Cancel := FEOF;
   if (Assigned(FOnProgress)) then FOnProgress(Self, Cancel);
 
-  Result := not Cancel;
+  if (Cancel) then
+    SetEOF(True);
+
+  Result := (not FEOF);
 end;
 
-function TCachedBuffer.DoProgress: Boolean;
-begin
-  if (not Progress) then
-    SetFinished({EOF := }True);
-
-  Result := (not FFinished);
-end;
-
-procedure TCachedBuffer.CopyParameters(const Source: TCachedBuffer);
-begin
-  Self.FMemory := Source.FMemory;
-  // Self.FCallback := Source.FCallback;
-  Self.FPositionBase := Source.FPositionBase;
-  Self.FIsReader := Source.FIsReader;
-  Self.FFinished := Source.FFinished;
-  // FReserved1: Boolean;
-  // FReserved2: Boolean;
-  Self.Current := Source.Current;
-//  Self.Margin := Source.Margin;
-end;
 
 (*function TCachedBuffer.GetSize: Int64;
 begin
-  Result := {FPtrMargin +???} {Position}FPositionBase + (NativeInt(Current)-NativeInt(FMemory.Buffer));
+  Result := {FPtrMargin +???} {Position}FPositionBase + (NativeInt(Current)-NativeInt(FMemory.Data));
 
   if (not FIsReader) then
     Inc(Result, Margin);
@@ -1682,12 +1632,7 @@ end;
 
 function TCachedBuffer.GetPosition: Int64;
 begin
-  Result := FPositionBase + (NativeInt(Current) - NativeInt(FMemory.Buffer));
-end;
-
-procedure TCachedBuffer.SetPosition(const Value: Int64);
-begin
-  // todo
+  Result := FPositionBase + (NativeInt(Current) - NativeInt(FMemory.Data));
 end;
 
 function TCachedBuffer.CheckLimit(const Value: Int64): Boolean;
@@ -1704,8 +1649,8 @@ begin
 
   // check limit value
   Position := Self.Position;
-  if (FFinished) or (Value < 0) or (Position < Value) or
-     ({FIsReader and} FReaderFinishing and (Value > FLimit)) or
+  if (FEOF) or (Value < 0) or (Position < Value) or
+     ({FIsReader and} FFinishing and (Value > FLimit)) or
      (not CheckLimit(Value)) then
     RaiseLimitValue(Value);
 
@@ -1721,39 +1666,20 @@ begin
     // correct Margin to MarginLimit value
     Dec(FOverflow, Margin - NativeInt(MarginLimit));
 
-    // ReaderFinishing & Finished
-    if (FIsReader) then
+    // Finishing & Finished
+    if (Kind = cbReader) then
     begin
-      FReaderFinishing := True;
+      FFinishing := True;
 
       if (Current = FOverflow) then
       begin
-        SetFinished({EOF := }True);
+        SetEOF({EOF := }True);
         DoProgress;
       end;
     end;
   end;
 end;
 
-procedure TCachedBuffer.Seek(const Offset: NativeInt);
-begin
-
-end;
-
-function TCachedBuffer.Seek(const Offset: Int64; const Origin: Word): Int64;
-begin
-  Result := 0;
-  // todo
-end;
-
-function TCachedBuffer.ProgressUsed: Boolean;
-var
-  Proc: function: Boolean of object;
-begin  
-  Proc := Self.Progress;
-  Result := (Assigned(FOnProgress)) or (TMethod(Proc).Code <> @TCachedBuffer.Progress);
-end;
-  
 function TCachedBuffer.Flush: NativeUInt;
 var
   Cur, Over, MemLow, MemHigh: NativeUInt;
@@ -1764,13 +1690,13 @@ begin
   Cur := NativeUInt(Current);
   Over := NativeUInt(FOverflow);
   MemLow := NativeUInt(FStart);
-  MemHigh := NativeUInt(FMemory.Buffer) + FMemory.BufferSize + FMemory.AdditionalSize;
+  MemHigh := NativeUInt(FMemory.Additional) + FMemory.AdditionalSize;
   if (MemLow <= $ffff) or (Cur <= $ffff) or (Over <= $ffff) or
      (Cur < MemLow) or (Cur >= MemHigh) or
      (Over < MemLow) or (Over >= MemHigh) then RaisePointers;
 
   // finished
-  if (FFinished) then
+  if (FEOF) then
   begin
     if (Current <> FOverflow) then RaiseFinished;
     Result := 0;
@@ -1778,7 +1704,7 @@ begin
   end;
 
   // valid data reading/writing
-  if (not FIsReader) then
+  if (Kind = cbWriter) then
   begin
     if (FLimited) and (FLimit < Self.Position) then
       RaiseWriting;
@@ -1789,13 +1715,13 @@ begin
   end;
 
   // idle flush
-  if {(FIsReader) and} (FReaderFinishing) then
+  if {(FIsReader) and} (FFinishing) then
   begin
     Result := (Over - Cur);
 
     if (Result = 0) then
     begin
-      SetFinished({EOF := }True);
+      SetEOF({EOF := }True);
       DoProgress;
     end;
 
@@ -1806,7 +1732,7 @@ begin
   NewPositionBase := Self.Position;
   if (Cur > Over) then NewPositionBase := NewPositionBase - (Cur - Over);
   NewFinished := False;
-  if (not FIsReader) then
+  if (Kind = cbWriter) then
   begin
     if (DoWriterFlush) then
       NewFinished := True;
@@ -1814,12 +1740,12 @@ begin
   begin
     if (DoReaderFlush) then
     begin
-      FReaderFinishing := True;
+      FFinishing := True;
       if (Current = FOverflow{R = 0}) then NewFinished := True;
     end;
   end;
   FPositionBase := NewPositionBase;
-  FFinished := NewFinished;
+  FEOF := NewFinished;
   DoProgress;
 
   // Result
@@ -1838,13 +1764,13 @@ begin
     Current := FHighWritten;
 
   // flush size
-  FlushSize := NativeUInt(Current) - NativeUInt(FMemory.Buffer);
-  Result := (FlushSize < FMemory.BufferSize);
+  FlushSize := NativeUInt(Current) - NativeUInt(FMemory.Data);
+  Result := (FlushSize < FMemory.Size);
   OverflowSize := 0;
-  if (FlushSize > FMemory.BufferSize) then
+  if (FlushSize > FMemory.Size) then
   begin
-    OverflowSize := FlushSize - FMemory.BufferSize;
-    FlushSize := FMemory.BufferSize;
+    OverflowSize := FlushSize - FMemory.Size;
+    FlushSize := FMemory.Size;
   end;
 
   // detect margin limit
@@ -1854,18 +1780,18 @@ begin
   // run callback
   if (FlushSize <> 0) then
   begin
-    R := FFlushCallback(Self, FMemory.Buffer, FlushSize);
+    R := FCallback(Self, FMemory.Data, FlushSize);
     if (R <> FlushSize) then RaiseWriting;
   end;
 
   // current
-  Current := FMemory.Buffer;
+  Current := FMemory.Data;
   if (OverflowSize <> 0) then
   begin
     NcMove(FOverflow^, Current^, OverflowSize);
     Inc(Current, OverflowSize);
   end;
-  FHighWritten := FStart{FMemory.Buffer};
+  FHighWritten := FStart{FMemory.Data};
 
   // overflow correction
   if (FLimited) then
@@ -1891,22 +1817,22 @@ begin
   begin
     if (Margin > FMemory.PreviousSize) then
     begin
-      Temp := CachedBufferMemory(Margin, FMemory.BufferSize);
+      Temp := CachedBufferMemory(Margin, FMemory.Size);
       Handle := FMemory.Handle;
       try
-        NcMove(Current^, Pointer(NativeUInt(Temp.Buffer) - Margin)^, Margin);
+        NcMove(Current^, Pointer(NativeUInt(Temp.Data) - Margin)^, Margin);
         FMemory := Temp;
       finally
         FreeMem(Handle);
       end;
     end else
     begin
-      NcMove(Current^, Pointer(NativeUInt(FMemory.Buffer) - Margin)^, Margin);
+      NcMove(Current^, Pointer(NativeUInt(FMemory.Data) - Margin)^, Margin);
     end;
   end;
 
   // flush size
-  FlushSize := FMemory.BufferSize;
+  FlushSize := FMemory.Size;
   Result := False;
   if (FLimited) then
   begin
@@ -1924,15 +1850,15 @@ begin
     R := FlushSize{0};
   end else
   begin
-    R := FFlushCallback(Self, FMemory.Buffer, FlushSize);
+    R := FCallback(Self, FMemory.Data, FlushSize);
     if (R > FlushSize) then RaiseReading;
     if (R < FlushSize) then Result := True;
   end;
 
   // current/overflow
-  FStart := Pointer(NativeUInt(FMemory.Buffer) - Margin);
+  FStart := Pointer(NativeUInt(FMemory.Data) - Margin);
   Current := FStart;
-  FOverflow := Pointer(NativeUInt(FMemory.Buffer) + R);
+  FOverflow := Pointer(NativeUInt(FMemory.Data) + R);
 end;
 
 
@@ -2449,10 +2375,10 @@ end;
 
 { TCachedReader }
 
-constructor TCachedReader.Create(const FlushCallback: TCachedBufferFlushCallback;
+constructor TCachedReader.Create(const Callback: TCachedBufferCallback;
   const BufferSize: NativeUInt);
 begin
-  inherited Create(True, FlushCallback, BufferSize);
+  inherited Create(cbReader, Callback, BufferSize);
 end;
 
 function TCachedReader.DoDirectRead(const Position: Int64; var Buffer;
@@ -2475,11 +2401,11 @@ begin
   if (Count = 0) then Exit;
 
   PositionHigh := Position + Count;
-  Done := (not FFinished) and (Position >= 0) and ((not Limited) or (Limit >= PositionHigh));
+  Done := (not FEOF) and (Position >= 0) and ((not Limited) or (Limit >= PositionHigh));
   if (Done) then
   begin
-    CachedLow := FPositionBase - (NativeInt(FMemory.Buffer) - NativeInt(FStart));
-    CachedHigh := FPositionBase + (NativeInt(FOverflow) - NativeInt(FMemory.Buffer));
+    CachedLow := FPositionBase - (NativeInt(FMemory.Data) - NativeInt(FStart));
+    CachedHigh := FPositionBase + (NativeInt(FOverflow) - NativeInt(FMemory.Data));
 
     // cached data copy
     CachedOffset := 0;
@@ -2563,34 +2489,34 @@ begin
     Dec(Count, Margin);
 
     Flush;
-    if (FReaderFinishing) and (NativeUInt(Self.Margin) < Count) then
+    if (FFinishing) and (NativeUInt(Self.Margin) < Count) then
       RaiseReading;
   end;
 
   // if read data is too large, we can read data directly
-  if (Count >= FMemory.BufferSize) then
+  if (Count >= FMemory.Size) then
   begin
-    S := Count - (Count mod FMemory.BufferSize);
+    S := Count - (Count mod FMemory.Size);
     Dec(Count, S);
 
-    if (Self.ProgressUsed) then
+    if (Assigned(FOnProgress)) then
     begin
       while (S <> 0) do
       begin
-        if (FMemory.BufferSize <> FFlushCallback(Self, Buffer, FMemory.BufferSize)) then
+        if (FMemory.Size <> FCallback(Self, Buffer, FMemory.Size)) then
           RaiseReading;
 
-        Dec(S, FMemory.BufferSize);
-        Inc(Buffer, FMemory.BufferSize);
+        Dec(S, FMemory.Size);
+        Inc(Buffer, FMemory.Size);
         DoProgress;
-        Inc(FPositionBase, FMemory.BufferSize);
+        Inc(FPositionBase, FMemory.Size);
 
-        if (FFinished) and ((S <> 0) or (Count <> 0)) then
+        if (FEOF) and ((S <> 0) or (Count <> 0)) then
           RaiseReading;
       end;
     end else
     begin
-      if (S <> FFlushCallback(Self, Buffer, S)) then
+      if (S <> FCallback(Self, Buffer, S)) then
         RaiseReading;
 
       Inc(Buffer, S);
@@ -3078,10 +3004,10 @@ end;
 
 { TCachedWriter }
 
-constructor TCachedWriter.Create(const FlushCallback: TCachedBufferFlushCallback;
+constructor TCachedWriter.Create(const Callback: TCachedBufferCallback;
   const BufferSize: NativeUInt);
 begin
-  inherited Create(False, FlushCallback, BufferSize);
+  inherited Create(cbWriter, Callback, BufferSize);
 end;
 
 function TCachedWriter.DoDirectWrite(const Position: Int64; const Buffer;
@@ -3105,11 +3031,11 @@ begin
   if (Count = 0) then Exit;
 
   PositionHigh := Position + Count;
-  Done := (not FFinished) and (Position >= 0) and ((not Limited) or (Limit >= PositionHigh));
+  Done := (not FEOF) and (Position >= 0) and ((not Limited) or (Limit >= PositionHigh));
   if (Done) then
   begin
-    CachedLow := FPositionBase - (NativeInt(FMemory.Buffer) - NativeInt(FStart));
-    CachedHigh := FPositionBase + (NativeInt(FOverflow) - NativeInt(FMemory.Buffer));
+    CachedLow := FPositionBase - (NativeInt(FMemory.Data) - NativeInt(FStart));
+    CachedHigh := FPositionBase + (NativeInt(FOverflow) - NativeInt(FMemory.Data));
 
     // cached data copy
     CachedOffset := 0;
@@ -3182,7 +3108,7 @@ begin
     RaiseWriting;
 
   // write margin to Buffer if used
-  if (Current <> FMemory.Buffer) then
+  if (Current <> FMemory.Data) then
   begin
     if (NativeUInt(Current) < NativeUInt(FOverflow)) then
     begin
@@ -3198,29 +3124,29 @@ begin
   end;
 
   // if written data is too large, we can write data directly
-  if (Count >= FMemory.BufferSize) then
+  if (Count >= FMemory.Size) then
   begin
-    S := Count - (Count mod FMemory.BufferSize);
+    S := Count - (Count mod FMemory.Size);
     Dec(Count, S);
 
-    if (Self.ProgressUsed) then
+    if (Assigned(FOnProgress)) then
     begin
       while (S <> 0) do
       begin
-        if (FMemory.BufferSize <> FFlushCallback(Self, Buffer, FMemory.BufferSize)) then
+        if (FMemory.Size <> FCallback(Self, Buffer, FMemory.Size)) then
           RaiseWriting;
 
-        Dec(S, FMemory.BufferSize);
-        Inc(Buffer, FMemory.BufferSize);
+        Dec(S, FMemory.Size);
+        Inc(Buffer, FMemory.Size);
         DoProgress;
-        Inc(FPositionBase, FMemory.BufferSize);
+        Inc(FPositionBase, FMemory.Size);
 
-        if (FFinished) and ((S <> 0) or (Count <> 0)) then
+        if (FEOF) and ((S <> 0) or (Count <> 0)) then
           RaiseWriting;
       end;
     end else
     begin
-      if (S <> FFlushCallback(Self, Buffer, S)) then
+      if (S <> FCallback(Self, Buffer, S)) then
         RaiseWriting;
 
       Inc(Buffer, S);
@@ -3572,101 +3498,56 @@ end;
 
 { TCachedReReader }
 
-constructor TCachedReReader.Create(const Callback: TCachedReReaderCallback;
-  const Source: TCachedReader; const IsOwner: Boolean;
+constructor TCachedReReader.Create(const Callback: TCachedBufferCallback;
+  const Source: TCachedReader; const Owner: Boolean;
   const BufferSize: NativeUInt);
 begin
-  FReCallback := Callback;
   FSource := Source;
-  FReserved1 := IsOwner;
-  FReserved2 := GetIsDirect;
-
-  if (IsDirect) then
-  begin
-    Self.CopyParameters(Source);
-    Self.FFlushCallback := Self.InternalCallback;
-  end else
-  begin
-    inherited Create(InternalCallback, BufferSize);
-  end;
-end;
-
-function TCachedReReader.GetIsDirect: Boolean;
-begin
-  Result := False;
+  FOwner := Owner;
+  inherited Create(Callback, BufferSize);
 end;
 
 destructor TCachedReReader.Destroy;
 begin
-  if (IsDirect) then FMemory.Handle := nil;  
   inherited;
-  if (IsOwner) then FSource.Free;
-end;
-
-function TCachedReReader.InternalCallback(Sender: TCachedBuffer; Buffer: PByte;
-  BufferSize: NativeUInt): NativeUInt;
-begin
-  if (IsDirect) then
-  begin
-    Source.CopyParameters(Self);
-    Result := Source.FFlushCallback(Source, {FMemory.}Buffer, {FMemory.}BufferSize);
-  end else
-  begin
-    Result := FReCallback(Self, Buffer, BufferSize, Source);
-  end;
+  if (FOwner) then FSource.Free;
 end;
 
 
 { TCachedReWriter }
 
-constructor TCachedReWriter.Create(const Callback: TCachedReWriterCallback;
-  const Destination: TCachedWriter; const IsOwner: Boolean;
+
+constructor TCachedReWriter.Create(const Callback: TCachedBufferCallback;
+  const Target: TCachedWriter; const Owner: Boolean;
   const BufferSize: NativeUInt);
 begin
-  FReCallback := Callback;
-  FDestination := Destination;
-  FReserved1 := IsOwner;
-  FReserved2 := GetIsDirect;
-
-  if (IsDirect) then
-  begin
-    Self.CopyParameters(Destination);
-    Self.FFlushCallback := Self.InternalCallback;
-  end else
-  begin
-    inherited Create(InternalCallback, BufferSize);
-  end;
-end;
-
-function TCachedReWriter.GetIsDirect: Boolean;
-begin
-  Result := False;
+  FTarget := Target;
+  FOwner := Owner;
+  inherited Create(Callback, BufferSize);
 end;
 
 destructor TCachedReWriter.Destroy;
 begin
-  if (IsDirect) then FMemory.Handle := nil;
   inherited;
-  if (IsOwner) then FDestination.Free;
-end;
-
-function TCachedReWriter.InternalCallback(Sender: TCachedBuffer;
-  Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
-begin
-  if (IsDirect) then
-  begin
-    Destination.CopyParameters(Self);
-    Result := Destination.FFlushCallback(Destination, {FMemory.}Buffer, {FMemory.}BufferSize);
-  end else
-  begin
-    Result := FReCallback(Self, Buffer, BufferSize, Destination);
-  end;
+  if (FOwner) then FTarget.Free;
 end;
 
 
 { TCachedFileReader }
 
 constructor TCachedFileReader.Create(const FileName: string; const Offset,
+  Size: Int64);
+begin
+  // todo
+end;
+
+constructor TCachedFileReader.CreateHandled(const Handle: THandle;
+  const Size: Int64; const HandleOwner: Boolean);
+begin
+  // todo
+end;
+
+(*constructor TCachedFileReader.Create(const FileName: string; const Offset,
   LimitSize: Int64);
 
   procedure RaiseOpen;
@@ -3701,40 +3582,40 @@ begin
   end;
 
   inherited Create(InternalCallback, BufferSize);
-end;
+end;   *)
 
-function TCachedFileReader.InternalCallback(Sender: TCachedBuffer;
-  Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+function TCachedFileReader.InternalCallback(Sender: TCachedBuffer; Data: PByte;
+  Size: NativeUInt): NativeUInt;
 var
-  I, Size: Integer;
+  Count, ReadingSize: Integer;
 begin
   Result := 0;
 
   repeat
-    if (BufferSize > NativeUInt(High(Integer))) then Size := High(Integer)
-    else Size := BufferSize;
+    if (Size > NativeUInt(High(Integer))) then ReadingSize := High(Integer)
+    else ReadingSize := Size;
 
-    I := FileRead(FHandle, Buffer^, Size);
-    if (I < 0) then {$ifdef KOL}RaiseLastWin32Error{$else}RaiseLastOSError{$endif};
+    Count := FileRead(FHandle, Data^, ReadingSize);
+    if (Count < 0) then {$ifdef KOL}RaiseLastWin32Error{$else}RaiseLastOSError{$endif};
 
-    Inc(Buffer, I);
-    Dec(BufferSize, I);
-    Inc(Result, I);
-  until (I <> Size) or (BufferSize = 0);
+    Inc(Data, Count);
+    Dec(Size, Count);
+    Inc(Result, Count);
+  until (Count <> ReadingSize) or (Size = 0);
 end;
 
 destructor TCachedFileReader.Destroy;
 begin
   inherited;
 
-  if (IsHandleOwner) and
-     (Handle <> 0) and (Handle <> INVALID_HANDLE_VALUE) then FileClose(FHandle);
+  if (FHandleOwner) and (FHandle <> 0) and
+    (FHandle <> INVALID_HANDLE_VALUE) then FileClose(FHandle);
 end;
 
 
 { TCachedFileWriter }
 
-constructor TCachedFileWriter.Create(const FileName: string);
+(*constructor TCachedFileWriter.Create(const FileName: string);
 begin
   {$ifdef MSWINDOWS}
   FHandle := Windows.CreateFile(PChar(FileName), $0002{FILE_WRITE_DATA}, FILE_SHARE_READ, nil, CREATE_ALWAYS, 0, 0);
@@ -3783,14 +3664,45 @@ begin
     Dec(BufferSize, I);
     Inc(Result, I);
   until (I <> Size) or (BufferSize = 0);
+end;   *)
+
+constructor TCachedFileWriter.Create(const FileName: string; const Size: Int64);
+begin
+  // todo
+end;
+
+constructor TCachedFileWriter.CreateHandled(const Handle: THandle;
+  const Size: Int64; const HandleOwner: Boolean);
+begin
+  // todo
 end;
 
 destructor TCachedFileWriter.Destroy;
 begin
   inherited;
 
-  if (IsHandleOwner) and
-     (Handle <> 0) and (Handle <> INVALID_HANDLE_VALUE) then FileClose(FHandle);
+  if (FHandleOwner) and (FHandle <> 0) and
+    (FHandle <> INVALID_HANDLE_VALUE) then FileClose(FHandle);
+end;
+
+function TCachedFileWriter.InternalCallback(Sender: TCachedBuffer; Data: PByte;
+  Size: NativeUInt): NativeUInt;
+var
+  Count, WritingSize: Integer;
+begin
+  Result := 0;
+
+  repeat
+    if (Size > NativeUInt(High(Integer))) then WritingSize := High(Integer)
+    else WritingSize := Size;
+
+    Count := FileWrite(FHandle, Data^, WritingSize);
+    if (Count < 0) then {$ifdef KOL}RaiseLastWin32Error{$else}RaiseLastOSError{$endif};
+
+    Inc(Data, Count);
+    Dec(Size, Count);
+    Inc(Result, Count);
+  until (Count <> WritingSize) or (Size = 0);
 end;
 
 
@@ -3802,13 +3714,13 @@ var
   BufferSize: NativeUInt;
 begin
   FPtr := Ptr;
-  FPtrMargin := Size;
+//  FPtrMargin := Size;
 
   if (Size = 0) then
   begin
     // inherited Create;
-    FIsReader := True;
-    FFinished := True;
+    FKind := cbReader;
+    FEOF := True;
   end else
   begin
     BufferSize := 0;
@@ -3818,21 +3730,47 @@ begin
   end;
 end;
 
-function TCachedMemoryReader.InternalCallback(Sender: TCachedBuffer;
-  Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+function TCachedMemoryReader.InternalCallback(Sender: TCachedBuffer; Data: PByte;
+  Size: NativeUInt): NativeUInt;
 begin
-  Result := BufferSize;
+  // todo
+(*  Result := BufferSize;
   if (Result > FPtrMargin) then Result := FPtrMargin;
 
   NcMove(FPtr^, Buffer^, Result);
   Inc(FPtr, Result);
-  Dec(FPtrMargin, Result);
+  Dec(FPtrMargin, Result); *)
+  Result := 0;
 end;
 
 
 { TCachedMemoryWriter }
 
 constructor TCachedMemoryWriter.Create(const Ptr: Pointer;
+  const Size: NativeUInt);
+begin
+  // todo
+end;
+
+constructor TCachedMemoryWriter.CreateTemporary;
+begin
+  // todo
+end;
+
+destructor TCachedMemoryWriter.Destroy;
+begin
+  inherited;
+  if (FTemporary) then FreeMem(FPtr); 
+end;
+
+function TCachedMemoryWriter.InternalCallback(Sender: TCachedBuffer;
+  Data: PByte; Size: NativeUInt): NativeUInt;
+begin
+  // todo
+  Result := 0;
+end;
+
+(*constructor TCachedMemoryWriter.Create(const Ptr: Pointer;
   const Size: NativeUInt);
 var
   BufferSize: NativeUInt;
@@ -3844,7 +3782,7 @@ begin
   begin
     // inherited Create;
     FIsReader := False;
-    FFinished := True;
+    FEOF := True;
   end else
   begin
     BufferSize := 0;
@@ -3863,7 +3801,7 @@ begin
   NcMove(Buffer^, FPtr^, Result);
   Inc(FPtr, Result);
   Dec(FPtrMargin, Result);
-end;
+end;   *)
 
 
 { TCachedResourceReader }
@@ -3883,7 +3821,7 @@ procedure TCachedResourceReader.InternalCreate(Instance: THandle; Name,
 
     V := NativeUInt(ResType);
     if (V <= High(Word)) then T := '#' + string({$ifdef KOL}Int2Str{$else}IntToStr{$endif}(Integer(V)))
-    else T:= '"' + string(ResType) + '"';
+    else T := '"' + string(ResType) + '"';
 
     raise ECachedBuffer.CreateFmt('Resource %s (%s) not found', [N, T]);
   end;
@@ -3918,11 +3856,5 @@ end;
 {$endif}
 
 
-
-
-
-initialization
-   
-  
 
 end.
