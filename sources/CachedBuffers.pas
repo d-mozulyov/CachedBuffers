@@ -2139,6 +2139,7 @@ begin
   begin
     repeat
       S := NativeUInt(FOverflow) - NativeUInt(Current);
+      if (S > Size) then S := Size;
       Current := FOverflow;
       Dec(Size, S);
       if (Size <> 0) then Flush;      
@@ -2720,7 +2721,7 @@ begin
   begin
     if (NativeUInt(Reader.Current) > NativeUInt(Reader.Overflow)) then Break;
     Size := NativeUInt(Reader.Overflow) - NativeUInt(Reader.Current);
-    if (Size > ReadLimit) then Size := ReadLimit;   
+    if (Size > ReadLimit) then Size := ReadLimit;
 
     Self.Write(Reader.Current^, Size);
     Inc(Reader.Current, Size);
