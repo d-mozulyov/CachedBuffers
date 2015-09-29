@@ -369,12 +369,15 @@ type
   TCachedMemoryReader = class(TCachedReader)
   protected
     FPtr: Pointer;
-//    FPtrMargin: NativeUInt;
+    FSize: NativeUInt;
+    FPtrMargin: NativeUInt;
 
+    function CheckLimit(const Value: Int64): Boolean; override;
     function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
   public
     constructor Create(const Ptr: Pointer; const Size: NativeUInt);
     property Ptr: Pointer read FPtr;
+    property Size: NativeUInt read FSize;
   end;
 
 { TCachedMemoryWriter class }
@@ -383,9 +386,12 @@ type
   protected
     FTemporary: Boolean;
     FPtr: Pointer;
-//    FPtrMargin: NativeUInt;
+    FSize: NativeUInt;
+    FPtrMargin: NativeUInt;
 
+    function CheckLimit(const Value: Int64): Boolean; override;
     function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
+    function InternalTemporaryCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
   {$ifNdef AUTOREFCOUNT}
   public
   {$endif}
@@ -395,6 +401,7 @@ type
     constructor CreateTemporary;
     property Temporary: Boolean read FTemporary;
     property Ptr: Pointer read FPtr;
+    property Size: NativeUInt read FSize;
   end;
 
 { TCachedResourceReader class }
@@ -601,10 +608,10 @@ begin
     FHighWritten := Current;
   end else
   begin
-    FStart := FOverflow;
     Current := FOverflow;
     FPositionBase := -Int64(FMemory.Size);
   end;
+  FStart := Current;
 end;
 
 procedure TCachedBuffer.AfterConstruction;
@@ -688,7 +695,7 @@ begin
 
   // check limit value
   Position := Self.Position;
-  if (FEOF) or (Value < 0) or (Position < Value) or
+  if (FEOF) or (Value < 0) or (Position > Value) or
      ({IsReader and} FFinishing and (Value > (Position + Self.Margin))) or
      (not CheckLimit(Value)) then
     RaiseLimitValue(Value);
@@ -902,6 +909,9 @@ end;
 
 
 {$ifdef CPUX86}
+var
+  SSE_SUPPORT: Boolean;
+
 procedure NcMoveInternal(const Source; var Dest; const Size: NativeUInt); forward;
 {$endif}
 
@@ -936,6 +946,7 @@ asm
     mov [EBX].TCachedReader.Current, eax
     sub eax, ecx
     xchg eax, edx
+    movzx ebx, byte ptr [SSE_SUPPORT]
     jmp NcMoveInternal
   {$else .CPUX64}
     mov rax, rcx
@@ -991,6 +1002,7 @@ asm
 
     mov [EBX].TCachedReader.Current, eax
     sub eax, ecx
+    movzx ebx, byte ptr [SSE_SUPPORT]
     jmp NcMoveInternal
   {$else .CPUX64}
     mov rax, rcx
@@ -1028,6 +1040,7 @@ procedure NcMove(const Source; var Dest; const Size: NativeUInt);
 {$ifdef CPUX86}
 asm
   push ebx
+  movzx ebx, byte ptr [SSE_SUPPORT]
   jmp NcMoveInternal
 end;
 procedure NcMoveInternal(const Source; var Dest; const Size: NativeUInt);
@@ -1035,6 +1048,28 @@ procedure NcMoveInternal(const Source; var Dest; const Size: NativeUInt);
 asm
   // basic routine
   {$ifdef CPUX86}
+    test ebx, ebx
+    jnz @x86_SSE_based
+
+    // non SSE 0..15
+    cmp ecx, 4
+    jb @move_03
+    cmp ecx, 16
+    jb @move_015
+
+    // non SSE dwords
+    mov ebx, ecx
+    shr ecx, 2
+    xchg esi, eax
+    xchg edi, edx
+    and ebx, 3
+    rep movsd
+
+    // non SSE last 0..3
+    xchg esi, eax
+    xchg edi, edx
+    jmp [offset @move_03_items + ebx*4]
+  @x86_SSE_based:
     cmp ecx, 32
   {$else .CPUX64}
     cmp r8, 32
@@ -2954,33 +2989,36 @@ var
   BufferSize: NativeUInt;
 begin
   FPtr := Ptr;
-//  FPtrMargin := Size;
+  FSize := Size;
+  FPtrMargin := Size;
 
-  if (Size = 0) then
+  if (Ptr = nil) or (Size = 0) then
   begin
-    // inherited Create;
-    FKind := cbReader;
-    FEOF := True;
+    FKind := cbReader; // inherited Create;
+    EOF := True;
   end else
   begin
     BufferSize := 0;
     if (Size < DEFAULT_CACHED_SIZE) then BufferSize := Size;
 
     inherited Create(InternalCallback, BufferSize);
+    Limit := Size;
   end;
+end;
+
+function TCachedMemoryReader.CheckLimit(const Value: Int64): Boolean;
+begin
+  Result := (Value <= Size);
 end;
 
 function TCachedMemoryReader.InternalCallback(Sender: TCachedBuffer; Data: PByte;
   Size: NativeUInt): NativeUInt;
 begin
-  // todo
-(*  Result := BufferSize;
+  Result := Size;
   if (Result > FPtrMargin) then Result := FPtrMargin;
 
-  NcMove(FPtr^, Buffer^, Result);
-  Inc(FPtr, Result);
-  Dec(FPtrMargin, Result); *)
-  Result := 0;
+  NcMove(Pointer(NativeUInt(FPtr) + Self.FSize - FPtrMargin)^, Data^, Result);
+  Dec(FPtrMargin, Result);
 end;
 
 
@@ -2988,60 +3026,75 @@ end;
 
 constructor TCachedMemoryWriter.Create(const Ptr: Pointer;
   const Size: NativeUInt);
-begin
-  // todo
-end;
-
-constructor TCachedMemoryWriter.CreateTemporary;
-begin
-  // todo
-end;
-
-destructor TCachedMemoryWriter.Destroy;
-begin
-  inherited;
-  if (FTemporary) then FreeMem(FPtr); 
-end;
-
-function TCachedMemoryWriter.InternalCallback(Sender: TCachedBuffer;
-  Data: PByte; Size: NativeUInt): NativeUInt;
-begin
-  // todo
-  Result := 0;
-end;
-
-(*constructor TCachedMemoryWriter.Create(const Ptr: Pointer;
-  const Size: NativeUInt);
 var
   BufferSize: NativeUInt;
 begin
   FPtr := Ptr;
+  FSize := Size;
   FPtrMargin := Size;
 
-  if (Size = 0) then
+  if (Ptr = nil) or (Size = 0) then
   begin
-    // inherited Create;
-    FIsReader := False;
-    FEOF := True;
+    FKind := cbWriter; // inherited Create;
+    EOF := True;
   end else
   begin
     BufferSize := 0;
     if (Size < DEFAULT_CACHED_SIZE) then BufferSize := Size;
 
     inherited Create(InternalCallback, BufferSize);
+    Limit := Size;
+  end;
+end;
+
+constructor TCachedMemoryWriter.CreateTemporary;
+begin
+  inherited Create(InternalTemporaryCallback);
+end;
+
+destructor TCachedMemoryWriter.Destroy;
+begin
+  inherited;
+  if (FTemporary) then FreeMem(FPtr);
+end;
+
+function TCachedMemoryWriter.CheckLimit(const Value: Int64): Boolean;
+begin
+  if (not FTemporary) then
+  begin
+    Result := (Value <= Size);
+  end else
+  begin
+    Result := True;
   end;
 end;
 
 function TCachedMemoryWriter.InternalCallback(Sender: TCachedBuffer;
-  Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
+  Data: PByte; Size: NativeUInt): NativeUInt;
 begin
-  Result := BufferSize;
+  Result := Size;
   if (Result > FPtrMargin) then Result := FPtrMargin;
 
-  NcMove(Buffer^, FPtr^, Result);
-  Inc(FPtr, Result);
+  NcMove(Data^, Pointer(NativeUInt(FPtr) + Self.FSize - FPtrMargin)^, Result);
   Dec(FPtrMargin, Result);
-end;   *)
+end;
+
+function TCachedMemoryWriter.InternalTemporaryCallback(Sender: TCachedBuffer;
+  Data: PByte; Size: NativeUInt): NativeUInt;
+var
+  NewPtrSize: NativeUInt;
+begin
+  if (Size <> 0) then
+  begin
+    NewPtrSize := Self.FSize + Size;
+    Self.FSize := NewPtrSize;
+    ReallocMem(FPtr, NewPtrSize);
+
+    NcMove(Data^, Pointer(NativeUInt(FPtr) + NewPtrSize - Size)^, Size);
+  end;
+
+  Result := Size;
+end;
 
 
 { TCachedResourceReader }
@@ -3096,5 +3149,19 @@ end;
 {$endif}
 
 
+{$ifdef CPUX86}
+procedure CheckSSESupport;
+asm
+  push ebx
+  mov eax, 1
+  cpuid
+  test edx, 02000000h
+  setnz [SSE_SUPPORT]
+  pop ebx
+end;
+
+initialization
+  CheckSSESupport;
+{$endif}
 
 end.
