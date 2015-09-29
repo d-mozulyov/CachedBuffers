@@ -327,9 +327,15 @@ type
   TCachedFileReader = class(TCachedReader)
   private
   protected
+    FFileName: string;
     FHandle: THandle;
     FHandleOwner: Boolean;
+    FOffset: Int64;
 
+    procedure InternalCreate(const Size: Int64; const Seeked: Boolean);
+    function CheckLimit(const Value: Int64): Boolean; override;
+    function DoDirectPreviousRead(Position: Int64; Data: PByte; Size: NativeUInt): Boolean; override;
+    function DoDirectFollowingRead(Position: Int64; Data: PByte; Size: NativeUInt): Boolean; override;
     function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
   {$ifNdef AUTOREFCOUNT}
   public
@@ -339,17 +345,23 @@ type
     constructor Create(const FileName: string; const Offset: Int64 = 0; const Size: Int64 = 0);
     constructor CreateHandled(const Handle: THandle; const Size: Int64 = 0; const HandleOwner: Boolean = False);
 
+    property FileName: string read FFileName;
     property Handle: THandle read FHandle;
     property HandleOwner: Boolean read FHandleOwner write FHandleOwner;
+    property Offset: Int64 read FOffset;
   end;
 
 { TCachedFileWriter class }
 
   TCachedFileWriter = class(TCachedWriter)
   protected
+    FFileName: string;
     FHandle: THandle;
     FHandleOwner: Boolean;
+    FOffset: Int64;
 
+    function DoDirectPreviousWrite(Position: Int64; Data: PByte; Size: NativeUInt): Boolean; override;
+    function DoDirectFollowingWrite(Position: Int64; Data: PByte; Size: NativeUInt): Boolean; override;
     function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
   {$ifNdef AUTOREFCOUNT}
   public
@@ -359,8 +371,10 @@ type
     constructor Create(const FileName: string; const Size: Int64 = 0);
     constructor CreateHandled(const Handle: THandle; const Size: Int64 = 0; const HandleOwner: Boolean = False);
 
+    property FileName: string read FFileName;
     property Handle: THandle read FHandle;
     property HandleOwner: Boolean read FHandleOwner write FHandleOwner;
+    property Offset: Int64 read FOffset;
   end;
 
 
@@ -534,7 +548,8 @@ end;
 
 const
   MEMORY_PAGE_SIZE = 4 * 1024;
-  DEFAULT_CACHED_SIZE = 64*1024;
+  DEFAULT_CACHED_SIZE = 64 * 1024;
+  DEFAULT_CACHED_FILE_SIZE = 256 * 1024;
 
 function CachedBufferMemory(const PreviousSize, BufferSize: NativeUInt): TCachedBufferMemory;
 var
@@ -581,6 +596,45 @@ begin
   {$endif}
 end;
 
+function OptimalFileBufferSize(const Size: Int64): NativeUInt;
+var
+  KB: NativeUInt;
+begin
+  Result := DEFAULT_CACHED_FILE_SIZE;
+  if (Size > 0) and (Size < (DEFAULT_CACHED_FILE_SIZE + DEFAULT_CACHED_FILE_SIZE div 4)) then
+  begin
+    KB := (NativeUInt(Size) + 1023) shr 10;
+    case KB of
+       0..32: Result := ((KB + 3) and -4) * 1024;
+      33..96: Result  := 32 * 1024;
+     97..192: Result  := 64 * 1024;
+    else
+      Result := 128 * 1024;
+    end;
+  end;
+end;
+
+function DirectCachedFileMethod(const Instance: TCachedBuffer;
+  const InstanceHandle: THandle; const InstanceOffset, Position: Int64;
+  const Data: PByte; const Size: NativeUInt): Boolean;
+var
+  SeekValue: Int64;
+  PositionValue: Int64;
+begin
+  SeekValue := FileSeek(InstanceHandle, Int64(0), 1{soFromCurrent});
+  try
+    PositionValue := Position + InstanceOffset;
+    if (PositionValue <> FileSeek(InstanceHandle, PositionValue, 0{soFromBeginning})) then
+    begin
+      Result := False;
+    end else
+    begin
+      Result := (Size = Instance.FCallback(Instance, Data, Size));
+    end;
+  finally
+    FileSeek(InstanceHandle, SeekValue, 0{soFromBeginning});
+  end;
+end;
 
 
 { TCachedBuffer }
@@ -1049,27 +1103,8 @@ asm
   // basic routine
   {$ifdef CPUX86}
     test ebx, ebx
-    jnz @x86_SSE_based
+    jz @x86_non_SSE
 
-    // non SSE 0..15
-    cmp ecx, 4
-    jb @move_03
-    cmp ecx, 16
-    jb @move_015
-
-    // non SSE dwords
-    mov ebx, ecx
-    shr ecx, 2
-    xchg esi, eax
-    xchg edi, edx
-    and ebx, 3
-    rep movsd
-
-    // non SSE last 0..3
-    xchg esi, eax
-    xchg edi, edx
-    jmp [offset @move_03_items + ebx*4]
-  @x86_SSE_based:
     cmp ecx, 32
   {$else .CPUX64}
     cmp r8, 32
@@ -1175,6 +1210,23 @@ asm
         mov [edx], cl
     @0: pop ebx
         ret
+  @x86_non_SSE:
+    // non-SSE 0..15
+    cmp ecx, 4
+    jb @move_03
+    cmp ecx, 16
+    jb @move_015
+    // non-SSE dwords
+    mov ebx, ecx
+    shr ecx, 2
+    xchg esi, eax
+    xchg edi, edx
+    and ebx, 3
+    rep movsd
+    // non-SSE last 0..3
+    xchg esi, eax
+    xchg edi, edx
+    jmp [offset @move_03_items + ebx*4]
   {$else .CPUX64}
     jmp qword ptr [r9 + rcx*8]
     @move_03_items: DQ @0,@1,@2,@3
@@ -2813,51 +2865,69 @@ end;
 constructor TCachedFileReader.Create(const FileName: string; const Offset,
   Size: Int64);
 begin
-  // todo
-end;
-
-constructor TCachedFileReader.CreateHandled(const Handle: THandle;
-  const Size: Int64; const HandleOwner: Boolean);
-begin
-  // todo
-end;
-
-(*constructor TCachedFileReader.Create(const FileName: string; const Offset,
-  LimitSize: Int64);
-
-  procedure RaiseOpen;
-  begin
-    raise ECachedBuffer.CreateFmt('Cannot open file:'#13'%s', [FileName]);
-  end;
-begin
+  FFileName := FileName;
+  FHandleOwner := True;
+  FOffset := Offset;
   {$ifdef MSWINDOWS}
   FHandle := Windows.CreateFile(PChar(FileName), $0001{FILE_READ_DATA}, FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
   {$else}
   FHandle := FileOpen(FileName, fmOpenRead or fmShareDenyNone);
   {$endif}
-  if (FHandle = INVALID_HANDLE_VALUE) then RaiseOpen;
+  if (FHandle = INVALID_HANDLE_VALUE) then
+    raise ECachedBuffer.CreateFmt('Cannot open file:'#13'%s', [FileName]);
 
-  Create(FHandle);
+  InternalCreate(Size, (Offset = 0));
 end;
 
-constructor TCachedFileReader.Create(const Handle: THandle;
-  const LimitSize: Int64; const HandleOwner: Boolean);
-var
-  BufferSize: NativeUInt;
+constructor TCachedFileReader.CreateHandled(const Handle: THandle;
+  const Size: Int64; const HandleOwner: Boolean);
 begin
   FHandle := Handle;
-  FReserved1{IsOwner} := HandleOwner;
-  FReserved2{Limited} := (LimitSize > 0);
+  FHandleOwner := HandleOwner;
+  FOffset := FileSeek(FHandle, Int64(0), 1{soFromCurrent});
+  if (FHandle = INVALID_HANDLE_VALUE) or (FOffset < 0) then
+    raise ECachedBuffer.Create('Invalid file handle');
 
-  BufferSize := 0;
-  if (Limited) then
+  InternalCreate(Size, True);
+end;
+
+procedure TCachedFileReader.InternalCreate(const Size: Int64; const Seeked: Boolean);
+var
+  FileSize: Int64;
+begin
+  FileSize := GetFileSize(FHandle);
+
+  if (FOffset < 0) or (FOffset > FileSize) or
+    ((not Seeked) and (FOffset <> FileSeek(FHandle, FOffset, 0{soFromBeginning}))) then
+    raise ECachedBuffer.CreateFmt('Invalid offset %d in %d bytes file'#13'%s',
+      [FOffset, FileSize, FFileName]);
+
+  FileSize := FileSize - Offset;
+  if (FileSize = 0) then
   begin
-    FLimitSize := LimitSize;
-    if (LimitSize < DEFAULT_CACHED_SIZE) then BufferSize := LimitSize;
-  end;
+    FKind := cbReader; // inherited Create;
+    EOF := True;
+  end else
+  begin
+    if (Size > 0) and (Size < FileSize) then FileSize := Size;
 
-  inherited Create(InternalCallback, BufferSize);
-end;   *)
+    inherited Create(InternalCallback, OptimalFileBufferSize(FileSize));
+    Limit := FileSize;
+  end;
+end;
+
+destructor TCachedFileReader.Destroy;
+begin
+  inherited;
+
+  if (FHandleOwner) and (FHandle <> 0) and
+    (FHandle <> INVALID_HANDLE_VALUE) then FileClose(FHandle);
+end;
+
+function TCachedFileReader.CheckLimit(const Value: Int64): Boolean;
+begin
+  Result := (Value <= (GetFileSize(FHandle) - FOffset));
+end;
 
 function TCachedFileReader.InternalCallback(Sender: TCachedBuffer; Data: PByte;
   Size: NativeUInt): NativeUInt;
@@ -2879,77 +2949,49 @@ begin
   until (Count <> ReadingSize) or (Size = 0);
 end;
 
-destructor TCachedFileReader.Destroy;
+function TCachedFileReader.DoDirectPreviousRead(Position: Int64; Data: PByte;
+  Size: NativeUInt): Boolean;
 begin
-  inherited;
+  Result := DirectCachedFileMethod(Self, FHandle, FOffset, Position, Data, Size);
+end;
 
-  if (FHandleOwner) and (FHandle <> 0) and
-    (FHandle <> INVALID_HANDLE_VALUE) then FileClose(FHandle);
+function TCachedFileReader.DoDirectFollowingRead(Position: Int64; Data: PByte;
+  Size: NativeUInt): Boolean;
+begin
+  Result := DirectCachedFileMethod(Self, FHandle, FOffset, Position, Data, Size);
 end;
 
 
 { TCachedFileWriter }
 
-(*constructor TCachedFileWriter.Create(const FileName: string);
-begin
-  {$ifdef MSWINDOWS}
-  FHandle := Windows.CreateFile(PChar(FileName), $0002{FILE_WRITE_DATA}, FILE_SHARE_READ, nil, CREATE_ALWAYS, 0, 0);
-  {$else}
-  FHandle := FileCreate(FileName);
-  {$endif}
-  if (FHandle = INVALID_HANDLE_VALUE) then raise ECachedBuffer.CreateFmt('Cannot create file:'#13'%s', [FileName]);
-
-  Create(FHandle);
-end;
-
-constructor TCachedFileWriter.Create(const Handle: THandle; const LimitSize: Int64;
-  const HandleOwner: Boolean);
-var
-  BufferSize: NativeUInt;
-begin
-  FHandle := Handle;
-  FReserved1{IsOwner} := HandleOwner;
-  FReserved2{Limited} := (LimitSize > 0);
-
-  BufferSize := 0;
-  if (Limited) then
-  begin
-    FLimitSize := LimitSize;
-    if (LimitSize < DEFAULT_CACHED_SIZE) then BufferSize := LimitSize;
-  end;
-
-  inherited Create(InternalCallback, BufferSize);
-end;
-
-function TCachedFileWriter.InternalCallback(Sender: TCachedBuffer;
-  Buffer: PByte; BufferSize: NativeUInt): NativeUInt;
-var
-  I, Size: Integer;
-begin
-  Result := 0;
-
-  repeat
-    if (BufferSize > NativeUInt(High(Integer))) then Size := High(Integer)
-    else Size := BufferSize;
-
-    I := FileWrite(FHandle, Buffer^, Size);
-    if (I < 0) then {$ifdef KOL}RaiseLastWin32Error{$else}RaiseLastOSError{$endif};
-
-    Inc(Buffer, I);
-    Dec(BufferSize, I);
-    Inc(Result, I);
-  until (I <> Size) or (BufferSize = 0);
-end;   *)
-
 constructor TCachedFileWriter.Create(const FileName: string; const Size: Int64);
+var
+  Handle: THandle;
 begin
-  // todo
+  FFileName := FileName;
+  {$ifdef MSWINDOWS}
+  Handle := Windows.CreateFile(PChar(FileName), $0002{FILE_WRITE_DATA}, FILE_SHARE_READ, nil, CREATE_ALWAYS, 0, 0);
+  {$else}
+  Handle := FileCreate(FileName);
+  {$endif}
+  if (Handle = INVALID_HANDLE_VALUE) then
+    raise ECachedBuffer.CreateFmt('Cannot create file:'#13'%s', [FileName]);
+
+  CreateHandled(Handle, Size, True);
 end;
 
 constructor TCachedFileWriter.CreateHandled(const Handle: THandle;
   const Size: Int64; const HandleOwner: Boolean);
 begin
-  // todo
+  FHandle := Handle;
+  FHandleOwner := HandleOwner;
+  FOffset := FileSeek(FHandle, Int64(0), 1{soFromCurrent});
+  if (FHandle = INVALID_HANDLE_VALUE) or (FOffset < 0) then
+    raise ECachedBuffer.Create('Invalid file handle');
+
+  inherited Create(InternalCallback, OptimalFileBufferSize(Size));
+  if (Size > 0) then
+    Limit := Size;
 end;
 
 destructor TCachedFileWriter.Destroy;
@@ -2978,6 +3020,18 @@ begin
     Dec(Size, Count);
     Inc(Result, Count);
   until (Count <> WritingSize) or (Size = 0);
+end;
+
+function TCachedFileWriter.DoDirectPreviousWrite(Position: Int64; Data: PByte;
+  Size: NativeUInt): Boolean;
+begin
+  Result := DirectCachedFileMethod(Self, FHandle, FOffset, Position, Data, Size);
+end;
+
+function TCachedFileWriter.DoDirectFollowingWrite(Position: Int64; Data: PByte;
+  Size: NativeUInt): Boolean;
+begin
+  Result := DirectCachedFileMethod(Self, FHandle, FOffset, Position, Data, Size);
 end;
 
 
