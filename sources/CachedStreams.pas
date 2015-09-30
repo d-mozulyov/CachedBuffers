@@ -252,10 +252,6 @@ function NewCachedBufferStream(const CachedBuffer: TCachedBuffer;
 
 implementation
 
-// protected fields "helper"
-type
-  TCachedBufferEx = class(TCachedBuffer);
-
 
 { TCachedStreamReader }
 

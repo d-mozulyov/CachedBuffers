@@ -325,7 +325,6 @@ type
 { TCachedFileReader class }
 
   TCachedFileReader = class(TCachedReader)
-  private
   protected
     FFileName: string;
     FHandle: THandle;
@@ -558,7 +557,8 @@ begin
   // detect sizes
   Result.PreviousSize := (PreviousSize + MEMORY_PAGE_SIZE - 1) and -MEMORY_PAGE_SIZE;
   Result.AdditionalSize := MEMORY_PAGE_SIZE;
-  if (BufferSize = 0) then Result.Size := DEFAULT_CACHED_SIZE;
+  if (BufferSize = 0) then Result.Size := DEFAULT_CACHED_SIZE
+  else
   Result.Size := (BufferSize + MEMORY_PAGE_SIZE - 1) and -MEMORY_PAGE_SIZE;
 
   // allocate
@@ -3219,3 +3219,4 @@ initialization
 {$endif}
 
 end.
+
