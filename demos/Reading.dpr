@@ -1,8 +1,11 @@
-program reading;
+program Reading;
 
 {$APPTYPE CONSOLE}
 
 // compiler options
+{$if CompilerVersion >= 24}
+  {$LEGACYIFEND ON}
+{$ifend}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
 {$ifndef VER140}
   {$WARN UNSAFE_CODE OFF}
@@ -14,70 +17,42 @@ program reading;
 uses
   Windows, SysUtils, Classes, CachedBuffers;
 
-
-const
-  CORRECT_FILE_NAME = 'correct_file.txt';
-  CORRECT_SUM = Int64($2904E86C0);
-
-{$if CompilerVersion < 19}
+// native ordinal types
+{$if (not Defined(FPC)) and (CompilerVersion < 22)}
 type
+  {$if CompilerVersion < 19}
   NativeInt = Integer;
   NativeUInt = Cardinal;
+  {$ifend}
+  PNativeInt = ^NativeInt;
+  PNativeUInt = ^NativeUInt;
 {$ifend}
 
+// test file information
+const
+  CORRECT_FILE_NAME = 'Correct.txt';
+  CORRECT_SUM = Int64($2904E86C0);
 
 procedure GenerateTestFile;
 const
   STRINGS_COUNT = 1000;
   ITERATIONS_COUNT = 22000;
 var
-  iteration, i: Integer;
-  F: TextFile;
+  Iteration, i: Integer;
+  T: TextFile;
   Buffer: array[Word] of Byte;
 begin
-  AssignFile(F, CORRECT_FILE_NAME);
-  ReWrite(F);
-  SetTextBuf(F, Buffer);
+  AssignFile(T, CORRECT_FILE_NAME);
+  ReWrite(T);
+  SetTextBuf(T, Buffer);
   try
-    for iteration := 1 to ITERATIONS_COUNT do
+    for Iteration := 1 to ITERATIONS_COUNT do
     for i := 1 to STRINGS_COUNT do
-      Writeln(F, i);
+      Writeln(T, i);
 
   finally
-    CloseFile(F);
+    CloseFile(T);
   end;
-end;
-
-procedure ConsoleWrite(const StrFmt: string; const Args: array of const;
-  const CRLFCount: Integer = 1); overload;
-var
-  i, Len: Integer;
-  S: PChar;
-  Buf: string;
-begin
-  Buf := Format(StrFmt, Args);
-  Len := Length(Buf);
-  S := pointer(Buf);
-  {$ifNdef UNICODE}
-  Windows.CharToOemBuffA(S, S, Len);
-  {$endif}
-
-  for i := 0 to Len - 1 do
-  if (S[i] = #13) then S[i] := #10;
-
-  if (CRLFCount <= 0) then
-  begin
-    Write(Buf);
-  end else
-  begin
-    Writeln(Buf);
-    for i := 2 to CRLFCount do Writeln;
-  end;
-end;
-
-procedure ConsoleWrite(const Text: string; const CRLFCount: Integer = 1); overload;
-begin
-  ConsoleWrite(Text, [], CRLFCount);
 end;
 
 // copied from System.ValLong and corrected to ShortString with DefValue 0
@@ -144,16 +119,72 @@ begin
     Result := -Result;
 end;
 
+const
+  PARSE_MARKER_CRLF = #13;
+  PARSE_MARKER_DIGIT = '1';
+
+(*
+   Many of the parsing algorithms use the <Pointer, Size> variables.
+   However, lots of tests show that it is more effective to use <Pointer, Overflow>
+   + some character markers in Additional memory on which the parser will
+   definitely stop. The productivity benefits are made due to fact that there is
+   no need to analyze the Size at every character reading time. Moreover with a
+   shortage of CPU registers, Overflow variables store on stack and the
+   comparison takes only 2 CPU cycles instead of 2 + 6 cycles at comparison and
+   modification of Size.
+
+   Sometimes it is useful to modify a "reading" memory. For example, with XML parsing
+   it is possible to replace the &...; entities with the real characters.
+   Knowing the storage features of System types it is possible for example
+   to emulate UnicodeString or dynamic array instances. In this function we emulate
+   ShortString by store length byte on Previous memory.
+
+   The function parses and sums up the numbers stopping on markers at the end.
+   It returns the pointer to the last non-parsed data at the end of the buffer.
+*)
+function AddParsedTextNumbers(var Sum: Int64; Current: PAnsiChar; Overflow: PAnsiChar): PAnsiChar;
+var
+  S: PAnsiChar;
+  Len: NativeUInt;
+begin
+  repeat
+    // left trim
+    while (Current^ <= ' ') do Inc(Current);
+    if (Current >= Overflow{overflow marker found}) then
+    begin
+      Current := Overflow;
+      Break;
+    end;
+
+    // find first non-numeric character or marker
+    S := Current + 1;
+    while (S^ > ' ') do Inc(S);
+    if (S >= Overflow{overflow marker found}) then Break;
+
+    // length
+    Len := NativeUInt(S) - NativeUInt(Current);
+
+    // WRITE length to previous memory and use char buffer as ShortString pointer
+    // ShortString = [Len: Byte] array(Len) of AnsiChar
+    Dec(Current);
+    Byte(Current^) := Len;
+    Sum := Sum + ShortStrToInt(PShortString(Current)^);
+
+    // next current character
+    Current := S + 1;
+  until (False);
+
+  // return current usually numeric string pointer
+  Result := Current;
+end;
+
 
 type
-  TBenchmarkProc = function(const FileName: string): Int64;
+  TParsingMethod = function(const FileName: string): Int64;
 
-var
-  ProcNumber: Cardinal = 0; // test comment 
-
-// standard way to read and process strings:
-// with TStringList
-function StringListReader(const FileName: string): Int64;
+// standard way to load file and
+// process every TStringList item
+function StringListParsing(const FileName: string): Int64;
 var
   i: Integer;
   List: TStringList;
@@ -170,166 +201,138 @@ begin
   end;
 end;
 
-
-// very fast reading method
+// fast parsing method
 // but it need too much memory (same as file size)
-function FastBufferingReader(const FileName: string): Int64;
+function AllocatedMemoryParsing(const FileName: string): Int64;
 var
-  Mem: Pointer;
-  Size, Len: Integer;
-  Current: PAnsiChar;
-  S: PByte; // PShortString
+  Memory: Pointer;
   F: TFileStream;
+  Size: Integer;
+  Current, Overflow: PAnsiChar;
 begin
-  Result := 0;
-
-  Mem := nil;
+  Memory := nil;
   try
-    // read file to memory
+    // read entire file to allocated memory buffer
     F := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
     try
       Size := F.Size;
-      GetMem(Mem, Size + 1);
-      Current := Mem;
-      Inc(Current);
+      GetMem(Memory, 1{previous} + Size + 3{markers});
+
+      Current := PAnsiChar(Memory) + 1;
       F.Read(Current^, Size);
     finally
       F.Free;
     end;
 
-    // parse memory
-    while (True) do
-    begin
-      // skip CRLF
-      while (Size > 0) and (Current^ in [#13, #10]) do
-      begin
-        Inc(Current);
-        Dec(Size);
-      end;
+    // overflow
+    Overflow := Current + Size;
 
-      // look length of string
-      S := Pointer(Current);
-      Dec(S);
-      while (Size > 0) and (not (Current^ in [#13, #10])) do
-      begin
-        Inc(Current);
-        Dec(Size);
-      end;
-      Len := NativeInt(Current) - NativeInt(S) - 1;
-      if (Len <= 0) or (Len > 255) then Break;
+    // mark CRLF to parse last number correctly
+    Overflow^ := #13;
+    Inc(Overflow);
 
-      // string to int
-      S^ := Len;
-      Result := Result + ShortStrToInt(PShortString(S)^);
-    end;
+    // advanced markers
+    Overflow[0] := PARSE_MARKER_CRLF;
+    Overflow[1] := PARSE_MARKER_DIGIT;
+
+    // parse numbers
+    Result := 0;
+    AddParsedTextNumbers(Result, Current, Overflow);
   finally
-    if (Mem <> nil) then FreeMem(Mem);
+    if (Memory <> nil) then FreeMem(Memory);
   end;
 end;
 
-
-// fast file parsing by using TCachedFileReader
-function CachedFileReader(const FileName: string): Int64;
-label
-  flush;
+// optimal way to sequential file parsing
+// flush and parse memory buffer by TCachedReader interface
+function CachedReaderParsing(const FileName: string): Int64;
 var
-  Reader: TCachedFileReader; 
-  Size, Len: Integer;
-  Current: PAnsiChar;
+  Reader: TCachedReader;
+  Current, Overflow: PAnsiChar;
 begin
   Result := 0;
-//  Reader.Initialize(FileName);
+
+  Reader := TCachedFileReader.Create(FileName);
   try
-    while (True) do
+    while (not Reader.EOF) do
     begin
-//      Size := Reader.Margin;
-//      Current := Reader.Current;
+      Current := PAnsiChar(Reader.Current);
+      Overflow := PAnsiChar(Reader.Overflow);
 
-      while (True) do
+      // mark CRLF to parse last number correctly
+      if (Reader.Finishing) then
       begin
-        // skip CRLF
-        while (Size > 0) and (Current^ in [#13, #10]) do
-        begin
-          Inc(Current);
-          Dec(Size);
-        end;
-        if (Size = 0) then goto flush;
-
-        // look length of string
-        Len := 1;
-        while (Len < Size) and (not (Current[Len] in [#13, #10])) do Inc(Len);
-//        if (Len = Size) and (not Reader.Finishing) then goto flush;
-        if (Len > 255) then exit;
-
-        // get string + to int
-        Dec(Current);
-        PByte(Current)^ := Len;
-        Result := Result + ShortStrToInt(PShortString(Current)^);
-
-        // increment
-        Inc(Current, Len + 1);
-        Dec(Size, Len);
+        Overflow^ := #13;
+        Inc(Overflow);
       end;
 
-    flush:
-//      Reader.Margin := Size;
-//      Reader.Current := Current;
-//      if (Reader.Finishing) then Break;
-      Reader.Flush();
+      // markers
+      Overflow[0] := PARSE_MARKER_CRLF;
+      Overflow[1] := PARSE_MARKER_DIGIT;
+
+      // parse reader memory, flush reader (or EOF in Finishing case)
+      Reader.Current := PByte(AddParsedTextNumbers(Result, Current, Overflow));
+      if (Reader.Finishing) then Reader.Current := Reader.Overflow;
+      Reader.Flush;
     end;
   finally
-//    Reader.Finalize();
+    Reader.Free;
   end;
 end;
 
+// run parser and measure the time
+var
+  ParsingMethodNumber: Cardinal = 0;
 
-// note the time and check proc result
-procedure RunBenchmarkProc(const Description: string; const Proc: TBenchmarkProc);
+procedure RunParsingMethod(const Description: string; const ParsingMethod: TParsingMethod);
 var
   Time: Cardinal;
-  Ret: Int64;
+  Sum: Int64;
 begin
   // reset filesystem cache to have same test conditions
   // (thanks for Sapersky)
   FileClose(CreateFile(PChar(CORRECT_FILE_NAME), GENERIC_READ, FILE_SHARE_READ, nil ,OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, 0));
 
-  // run proc and get time
-  Inc(ProcNumber);
-  ConsoleWrite('%d) "%s"... ', [ProcNumber, Description], 0);
+  Inc(ParsingMethodNumber);
+  Write(ParsingMethodNumber, ') ', Description, '...');
   Time := GetTickCount;
-    Ret := Proc(CORRECT_FILE_NAME);
+    Sum := ParsingMethod(CORRECT_FILE_NAME);
   Time := GetTickCount - Time;
 
-  // information
-  ConsoleWrite('%dms', [Time]);
-  if (Ret <> CORRECT_SUM) then ConsoleWrite('FAIL!!! Sum = 0x%s', [IntToHex(Ret, 0)]);
+  Write(' ', Time, 'ms');
+  if (Sum <> CORRECT_SUM) then Write(' FAILURE Sum = 0x%s', IntToHex(Sum, 0));
+  Writeln;
 end;
+
 
 begin
   try
-    // Information
-    ConsoleWrite('The benchmark shows how quickly you can read/parse files');
-    ConsoleWrite('Testing file is "correct_file.txt" (about 100Mb)');
-    ConsoleWrite('Total sum of numbers must be equal 0x%s', [IntToHex(CORRECT_SUM, 0)], 3);
+    // benchmark text
+    Writeln('The benchmark helps to compare the time of binary/text files parsing methods');
+    Writeln('Testing file is "Correct.txt" (about 100Mb)');
+    Writeln('Total sum of numbers must be equal 0x', IntToHex(CORRECT_SUM, 0));
+    if (not FileExists(CORRECT_FILE_NAME)) then
+    begin
+      Write('Correct file generating... ');
+      GenerateTestFile;
+      Writeln('done.');
+    end;
 
-    // Generate the missing file
-    if (not FileExists(CORRECT_FILE_NAME)) then GenerateTestFile;
-
-    // Run benchmark procs
-    ConsoleWrite('Let''s test methods (it may take a few minutes):');
-    RunBenchmarkProc('Fast buffering reader', FastBufferingReader);
-    RunBenchmarkProc('Using CachedFileReader', CachedFileReader);
-    RunBenchmarkProc('Standard TStringList reader', StringListReader);
-
+    // run parsers, measure time, compare summary value
+    Writeln;
+    Writeln('Let''s test parsing methods (it may take a few minutes):');
+    RunParsingMethod('Allocated 100Mb memory', AllocatedMemoryParsing);
+    RunParsingMethod('CachedReader', CachedReaderParsing);
+    RunParsingMethod('StringList', StringListParsing);
   except
     on E: Exception do
-    ConsoleWrite('%s: %s', [E.ClassName, E.Message]);
+    Writeln(E.ClassName, ': ', E.Message);
   end;
 
   if (ParamStr(1) <> '-nowait') then
   begin
     Writeln;
-    ConsoleWrite('Press Enter to quit', 0);
+    Write('Press Enter to quit');
     Readln;
   end;
 end.

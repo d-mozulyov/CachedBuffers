@@ -1,8 +1,11 @@
-program writing;
+program Writing;
 
 {$APPTYPE CONSOLE}
 
 // compiler options
+{$if CompilerVersion >= 24}
+  {$LEGACYIFEND ON}
+{$ifend}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
 {$ifndef VER140}
   {$WARN UNSAFE_CODE OFF}
@@ -12,348 +15,415 @@ program writing;
 {$O+}{$R-}{$I-}{$Q-}{$W-}
 
 uses
-  Windows, SysUtils, Classes, CachedBuffers;
+  Windows, SysUtils, Classes, CachedBuffers, CachedStreams;
 
-
-const
-  CORRECT_FILE_NAME = 'correct_file.txt';
-
-{$if CompilerVersion < 19}
+// native ordinal types
+{$if (not Defined(FPC)) and (CompilerVersion < 22)}
 type
+  {$if CompilerVersion < 19}
   NativeInt = Integer;
   NativeUInt = Cardinal;
+  {$ifend}
+  PNativeInt = ^NativeInt;
+  PNativeUInt = ^NativeUInt;
 {$ifend}
 
-procedure ConsoleWrite(const StrFmt: string; const Args: array of const;
-  const CRLFCount: Integer = 1); overload;
+// test string array
 var
-  i, Len: Integer;
-  S: PChar;
-  Buf: string;
+  TEST_STRINGS: array[1..1000] of record
+    Value: AnsiString;
+    Length: Integer;
+  end;
+
+procedure GenerateTestStrings;
+var
+  i: Integer;
 begin
-  Buf := Format(StrFmt, Args);
-  Len := Length(Buf);
-  S := pointer(Buf);
-  {$ifNdef UNICODE}
-  Windows.CharToOemBuffA(S, S, Len);
-  {$endif}
-
-  for i := 0 to Len - 1 do
-  if (S[i] = #13) then S[i] := #10;
-
-  if (CRLFCount <= 0) then
+  for i := Low(TEST_STRINGS) to High(TEST_STRINGS) do
   begin
-    Write(Buf);
-  end else
-  begin
-    Writeln(Buf);
-    for i := 2 to CRLFCount do Writeln;
+    TEST_STRINGS[i].Value := AnsiString(IntToStr(i));
+    TEST_STRINGS[i].Length := Length(TEST_STRINGS[i].Value);
   end;
 end;
 
-procedure ConsoleWrite(const Text: string; const CRLFCount: Integer = 1); overload;
-begin
-  ConsoleWrite(Text, [], CRLFCount);
-end;
-
-procedure CompareFiles(const FileName1, FileName2: string;
-  const CompactInfo: Boolean = True);
+// file names and comparison
 const
-  BUFFER_SIZE = 256 * 1024;
+  CORRECT_FILE_NAME = 'Correct.txt';
+  OUTPUT_FILE_NAME = 'Output.txt';
+
+procedure CompareOutputAndCorrectFiles;
 var
-  Name1, Name2: string;
-  F1, F2: THandle;
-  S1, S2: Int64;
-
-  Reading: Integer;
-  SameFiles: Boolean;
-
-  Buffer1: array[0..BUFFER_SIZE-1] of Byte;
-  Buffer2: array[0..BUFFER_SIZE-1] of Byte;
-
-  function OpenReadingFile(const FileName: string; out Size: Int64): THandle;
-  begin
-    Result := FileOpen(FileName, fmOpenRead or fmShareDenyNone);
-    if (NativeInt(Result) < 0) then
-      raise Exception.CreateFmt('Cannot read file:'#13'%s', [FileName]);
-
-    Size := FileSeek(Result, Int64(0), FILE_END);
-    FileSeek(Result, 0, FILE_BEGIN);
-  end;
-
-  procedure ReadBuffer(const F: THandle; var Buffer; const Count: Integer);
-  begin
-    if (Count <> FileRead(F, Buffer, Count)) then
-      raise Exception.Create('Stream read error');
-  end;
-
+  F1, F2: TFileStream;
+  Size: Int64;
+  Count: Integer;
+  Same: Boolean;
+  Buffer1, Buffer2: array[1..64*1024] of Byte;
 begin
-  Name1 := ExtractFileName(FileName1);
-  Name2 := ExtractFileName(FileName2);
-  if (CompactInfo) then ConsoleWrite('comparing with correct file... ', 0)
-  else ConsoleWrite('Files comparing "%s" and "%s"... ', [Name1, Name2], 0);
 
-  if (not FileExists(FileName1)) then
+  if (not FileExists(CORRECT_FILE_NAME)) then
   begin
-    ConsoleWrite('"%s" not found', [Name1]);
+    Writeln('"', CORRECT_FILE_NAME, '" not found');
     Abort;
   end;
-  if (not FileExists(FileName2)) then
+  if (not FileExists(OUTPUT_FILE_NAME)) then
   begin
-    ConsoleWrite('"%s" not found', [Name2]);
+    Writeln('"', OUTPUT_FILE_NAME, '" not found');
     Abort;
   end;
 
-  F1 := OpenReadingFile(FileName1, S1);
+  F1 := TFileStream.Create(CORRECT_FILE_NAME, fmOpenRead or fmShareDenyWrite);
   try
-    F2 := OpenReadingFile(FileName2, S2);
+    Size := F1.Size;
+    F2 := TFileStream.Create(CORRECT_FILE_NAME, fmOpenRead or fmShareDenyWrite);
     try
-      if (S1 <> S2) then
+      if (Size <> F2.Size) then
       begin
-        ConsoleWrite('different sizes: %d and %d', [S1, S2]);
+        Writeln('FAILURE SIZE: ', Size, ' and ', F2.Size);
         Abort;
       end;
 
-      SameFiles := True;
-      while (S1 <> 0) do
+      Same := True;
+      while (Size <> 0) do
       begin
-        if (S1 < BUFFER_SIZE) then Reading := S1
-        else Reading := BUFFER_SIZE;
+        Count := SizeOf(Buffer1);
+        if (Count > Size) then Count := Size;
 
-        ReadBuffer(F1, Buffer1, Reading);
-        ReadBuffer(F2, Buffer2, Reading);
-        if (not CompareMem(@Buffer1, @Buffer2, Reading)) then
+        F1.ReadBuffer(Buffer1, Count);
+        F2.ReadBuffer(Buffer2, Count);
+        if (not CompareMem(@Buffer1, @Buffer2, Count)) then
         begin
-          SameFiles := False;
+          Same := False;
           Break;
         end;
 
-        S1 := S1 - Reading;
+        Size := Size - Count;
       end;
 
-      if (not SameFiles) then
+      if (not Same) then
       begin
-        ConsoleWrite('NOT EQUAL !!!');
+        Writeln('FAILURE');
         Abort;
       end else
       begin
-        ConsoleWrite('binary equal.');
+        Writeln('done.');
       end;
     finally
-      FileClose(F2);
+      F2.Free
     end;
   finally
-    FileClose(F1);
+    F1.Free;
   end;
 end;
 
+(*
+   There is a several common binary/text files generation methods:
+     - TStream.Write
+     - TStringList save to File/Stream
+     - File/TextFile Writeln
+
+   You can significantly increase the perfornace with CachedBuffer classes:
+     - TCachedWriter (TCachedFileWriter)
+     - TCachedStreamWriter (TCachedWriter) + TFileStream
+     - TCachedBufferStream (TStream) + TCachedFileWriter
+*)
 
 const
   CRLF_VALUE = 13 or (10 shl 8);
   CRLF: Word = CRLF_VALUE;
-  STRINGS_COUNT = 1000;
-  ITERATIONS_COUNT = 22000;// div 100;
-
-var
-  ProcNumber: Cardinal = 0;
-
-  STRINGS: array[1..STRINGS_COUNT] of record
-    Len: Integer;
-    S: AnsiString;
-  end;
-
-  procedure INITIALIZE_STRINGS;
-  var
-    i: Integer;
-  begin
-    for i := Low(STRINGS) to High(STRINGS) do
-    with STRINGS[i] do
-    begin
-      S := AnsiString(IntToStr(i));
-      Len := Length(S);
-    end;
-  end;
-
-
-type
-  TBenchmarkProc = procedure(const FileName: string);
+  ITERATIONS_COUNT = 22000;
 
 // standard way to write data to Stream
-procedure StreamWriter(Stream: TStream);
+procedure AppendToStream(const Stream: TStream);
 var
-  iteration, i: Integer;
+  Iteration, i: Integer;
 begin
-  for iteration := 1 to ITERATIONS_COUNT do
-  for i := Low(STRINGS) to High(STRINGS) do
-  with STRINGS[i] do
+  for Iteration := 1 to ITERATIONS_COUNT do
+  for i := Low(TEST_STRINGS) to High(TEST_STRINGS) do
+  with TEST_STRINGS[i] do
   begin
-    Stream.Write(Pointer(S)^, Len);
+    Stream.Write(Pointer(Value)^, Length);
     Stream.Write(CRLF, SizeOf(CRLF));
   end;
 end;
 
-// use TFileStream to write data
-procedure FileStreamWriter(const FileName: string);
+// high level way to write data to CachedWriter
+procedure AppendToCachedWriterHighLevel(const Writer: TCachedWriter);
 var
-  Stream: TFileStream;
+  Iteration, i: Integer;
+begin
+  for Iteration := 1 to ITERATIONS_COUNT do
+  for i := Low(TEST_STRINGS) to High(TEST_STRINGS) do
+  with TEST_STRINGS[i] do
+  begin
+    Writer.Write(Pointer(Value)^, Length);
+    Writer.Write(CRLF, SizeOf(CRLF));
+  end;
+end;
+
+// difficult but the fastest way to write data with TCachedWriter
+// you should use Current, Margin and Flush directly. [optional additional memory]
+procedure AppendToCachedWriterDirectly(const Writer: TCachedWriter);
+var
+  Iteration, i, Length: Integer;
+  Current: PByte;
+begin
+  // store current cached pointer to fast register variable
+  Current := Writer.Current;
+
+  for Iteration := 1 to ITERATIONS_COUNT do
+  for i := Low(TEST_STRINGS) to High(TEST_STRINGS) do
+  begin
+    // write string data
+    Length := TEST_STRINGS[i].Length;
+    if (Length <= SizeOf(Int64)) then
+    begin
+      // use cached memory directly
+      if (Length <= SizeOf(Integer)) then PInteger(Current)^ := PInteger(TEST_STRINGS[i].Value)^
+      else PInt64(Current)^ := PInt64(TEST_STRINGS[i].Value)^;
+
+      Inc(Current, Length);
+    end else
+    begin
+      // you can use Overflow/Margin and Flush directly
+      // or call smart high level Write method
+      // but do not forget to retrieve Current value every high level (e.g. Flush) time
+      Writer.Current := Current;
+      Writer.Write(Pointer(TEST_STRINGS[i].Value)^, Length);
+      Current := Writer.Current;
+    end;
+
+    // CRLF_VALUE constant is better then CRLF "variable"
+    PWord(Current)^ := CRLF_VALUE;
+    Inc(Current, SizeOf(Word));
+    if (NativeUInt(Current) >= NativeUInt(Writer.Overflow)) then
+    begin
+      Writer.Current := Current;
+      Writer.Flush;
+      Current := Writer.Current;
+    end;
+  end;
+end;
+
+// standard way to write data to File/TextFile
+procedure AppendToTextFile(const T: TextFile);
+var
+  Iteration, i: Integer;
+begin
+  for Iteration := 1 to ITERATIONS_COUNT do
+  for i := Low(TEST_STRINGS) to High(TEST_STRINGS) do
+    Writeln(T, TEST_STRINGS[i].Value);
+end;
+
+// standard way to append strings to TStringList
+procedure AppendToStringList(const List: TStringList);
+var
+  Iteration, i: Integer;
+begin
+  for Iteration := 1 to ITERATIONS_COUNT do
+  for i := Low(TEST_STRINGS) to High(TEST_STRINGS) do
+    List.Add(string(TEST_STRINGS[i].Value));
+end;
+
+(*
+   So let's try to use some common methods, CachedWriter
+   and combine some of them
+*)
+
+type
+  TGeneratingMethod = procedure(const FileName: string);
+
+// standard TStringList + SaveToFile (slow)
+procedure StringListGenerating(const FileName: string);
+var
+  List: TStringList;
+begin
+  List := TStringList.Create;
+  try
+    AppendToStringList(List);
+    List.SaveToFile(FileName);
+  finally
+    List.Free;
+  end;
+end;
+
+// standard sequential TFileStream writing (slow)
+procedure FileStreamGenerating(const FileName: string);
+var
+  F: TFileStream;
+begin
+  F := TFileStream.Create(FileName, fmCreate);
+  try
+    AppendToStream(F);
+  finally
+    F.Free;
+  end;
+end;
+
+// standard sequential TMemoryStream writing + SaveToFile (slow)
+procedure MemoryStreamGenerating(const FileName: string);
+var
+  M: TMemoryStream;
+begin
+  M := TMemoryStream.Create;
+  try
+    AppendToStream(M);
+    M.SaveToFile(FileName);
+  finally
+    M.Free;
+  end;
+end;
+
+// standard TextFile writing
+procedure TextFileGenerating(const FileName: string);
+var
+  T: TextFile;
+begin
+  AssignFile(T, FileName);
+  ReWrite(T);
+  try
+    AppendToTextFile(T);
+  finally
+    CloseFile(T);
+  end;
+end;
+
+// standard TextFile + 64kb buffer writing (fast)
+procedure BufferedTextFileGenerating(const FileName: string);
+var
+  T: TextFile;
+  Buffer: array[Word] of Byte;
+begin
+  AssignFile(T, FileName);
+  ReWrite(T);
+  SetTextBuf(T, Buffer);
+  try
+    AppendToTextFile(T);
+  finally
+    CloseFile(T);
+  end;
+end;
+
+// high level TCachedFileWriter writing (very fast)
+procedure CachedFileWriterGenerating(const FileName: string);
+var
+  Writer: TCachedFileWriter;
+begin
+  Writer := TCachedFileWriter.Create(FileName);
+  try
+    AppendToCachedWriterHighLevel(Writer);
+  finally
+    Writer.Free;
+  end;
+end;
+
+// low level directly TCachedFileWriter writing (extremely fast)
+procedure CachedFileWriterDirectlyGenerating(const FileName: string);
+var
+  Writer: TCachedFileWriter;
+begin
+  Writer := TCachedFileWriter.Create(FileName);
+  try
+    AppendToCachedWriterDirectly(Writer);
+  finally
+    Writer.Free;
+  end;
+end;
+
+// use TCachedWriter --> TStream interaction
+procedure CachedStreamWriterGenerating(const FileName: string);
+var
+  Stream: TStream;
+  Writer: TCachedWriter;
 begin
   Stream := TFileStream.Create(FileName, fmCreate);
   try
-    StreamWriter(Stream);
+    Writer := TCachedStreamWriter.Create(Stream, False);
+    try
+      AppendToCachedWriterDirectly(Writer);
+    finally
+      Writer.Free;
+    end;
   finally
     Stream.Free;
   end;
 end;
 
-// write to TMemoryStream and SaveToFile
-procedure MemoryStreamWriter(const FileName: string);
+// use TStream --> TCachedWriter interaction
+procedure CachedBufferStreamGenerating(const FileName: string);
 var
-  Stream: TMemoryStream;
+  Writer: TCachedWriter;
+  Stream: TStream;
 begin
-  Stream := TMemoryStream.Create;
+  Writer := TCachedFileWriter.Create(FileName);
   try
-    StreamWriter(Stream);
-    Stream.SaveToFile(FileName);
-  finally
-    Stream.Free;
-  end;
-end;
-
-// use standard TextFile + 64k buffer
-procedure BufferedTextFileWriter(const FileName: string);
-var
-  iteration, i: Integer;
-  F: TextFile;
-  Buffer: array[Word] of Byte;
-begin
-  AssignFile(F, FileName);
-  ReWrite(F);
-  SetTextBuf(F, Buffer);
-  try
-    for iteration := 1 to ITERATIONS_COUNT do
-    for i := Low(STRINGS) to High(STRINGS) do
-    with STRINGS[i] do
-    begin
-      Writeln(F, S);
+    Stream := TCachedBufferStream.Create(Writer, False);
+    try
+      AppendToStream(Stream);
+    finally
+      Stream.Free;
     end;
-
   finally
-    CloseFile(F);
+    Writer.Free;
   end;
 end;
 
-// simple way to write data with TCachedFileWriter
-// Write method is like TStream.Write(Buffer, Size)
-procedure SimpleCachedFileWriter(const FileName: string);
+
+// generate output file and measure the time
 var
-  iteration, i: Integer;
-  Writer: TCachedFileWriter;
-begin
-//  Writer.Initialize(FileName);
-  try
-    for iteration := 1 to ITERATIONS_COUNT do
-    for i := Low(STRINGS) to High(STRINGS) do
-    with STRINGS[i] do
-    begin
-      Writer.Write(Pointer(S)^, Len);
-      Writer.Write(CRLF, SizeOf(CRLF));
-    end;
+  GeneratingMethodNumber: Cardinal = 0;
 
-  finally
-//    Writer.Finalize;
-  end;
-end;
-
-// difficult but the fastest way to write data with TCachedFileWriter
-// you should use Current, Margin and Flush. [optional additional memory]
-procedure FastCachedFileWriter(const FileName: string);
-var
-  iteration, i: Integer;
-  Writer: TCachedFileWriter;
-begin
-//  Writer.Initialize(FileName);
-  try
-    for iteration := 1 to ITERATIONS_COUNT do
-    for i := Low(STRINGS) to High(STRINGS) do
-    with STRINGS[i] do
-    begin
-      if (Len <= SizeOf(Int64)) then
-      begin
-        // fast Move
-        if (Len <= SizeOf(Integer)) then PInteger(Writer.Current)^ := PInteger(S)^
-        else PInt64(Writer.Current)^ := PInt64(S)^;
-
-        Inc(NativeInt(Writer.Current), Len);
-//        Dec(Writer.Margin, Len);
-      end else
-      begin
-        // smart Move
-        Writer.Write(pointer(S), Len);
-      end;
-
-      // CRLF
-      PWord(Writer.Current)^ := CRLF_VALUE;
-      Inc(NativeInt(Writer.Current), SizeOf(Word));
-//      Dec(Writer.Margin, SizeOf(Word));
-
-      // Flush if needed
-//      if (Writer.Margin <= 0) then Writer.Flush;
-    end;
-
-  finally
-//    Writer.Finalize;
-  end;
-end;
-
-
-// generate file name and note the time
-procedure RunBenchmarkProc(const Description: string; const Proc: TBenchmarkProc);
-const
-  FileName = 'out.txt';
+procedure RunGeneratingMethod(const Description: string; const GeneratingMethod: TGeneratingMethod);
 var
   Time: Cardinal;
 begin
-  Inc(ProcNumber);
-  ConsoleWrite('%d) "%s"... ', [ProcNumber, Description], 0);
+  Inc(GeneratingMethodNumber);
+  Write(GeneratingMethodNumber, ') ', Description, '...');
 
   Time := GetTickCount;
-    Proc(FileName);
+    GeneratingMethod(OUTPUT_FILE_NAME);
   Time := GetTickCount - Time;
+  Write(' ', Time, 'ms ');
 
-  ConsoleWrite('%dms', [Time]);
-  CompareFiles(FileName, CORRECT_FILE_NAME);
+  CompareOutputAndCorrectFiles;
 end;
 
 
 begin
   try
-    // Information and data generation
-    ConsoleWrite('The benchmark shows how quickly you can write files');
-    ConsoleWrite('Destination file must be same as "correct_file.txt" (about 100Mb)');
-    ConsoleWrite('Test data generating... ', 0);
-    INITIALIZE_STRINGS;
-    if (not FileExists(CORRECT_FILE_NAME)) then BufferedTextFileWriter(CORRECT_FILE_NAME);
-    ConsoleWrite('done.', 3);
+    // benchmark text
+    Writeln('The benchmark helps to compare the time of binary/text files generating methods');
+    Writeln('Output file must be equal to "Correct.txt" (about 100Mb)');
+    GenerateTestStrings;
+    if (not FileExists(CORRECT_FILE_NAME)) then
+    begin
+      Write('Correct file generating... ');
+      BufferedTextFileGenerating(CORRECT_FILE_NAME);
+      Writeln('done.');
+    end;
 
-    // Run benchmark procs
-    ConsoleWrite('Let''s test write methods (it may take an hour, but try to wait):');
-    RunBenchmarkProc('TextFile+Buffer', BufferedTextFileWriter);
-    RunBenchmarkProc('Simple CachedFileWriter', SimpleCachedFileWriter);
-    RunBenchmarkProc('Fast CachedFileWriter', FastCachedFileWriter);
-    RunBenchmarkProc('Standard TFileStream writer', FileStreamWriter);
-    RunBenchmarkProc('Standard TMemoryStream+SaveToFile', MemoryStreamWriter);
-
+    // run writers, measure time, compare with correct file
+    Writeln;
+    Writeln('Let''s test generating methods (it may take up to ten minutes):');
+    RunGeneratingMethod('StringList + SaveToFile', StringListGenerating);
+    RunGeneratingMethod('FileStream', FileStreamGenerating);
+    RunGeneratingMethod('MemoryStream + SaveToFile', MemoryStreamGenerating);
+    RunGeneratingMethod('TextFile', TextFileGenerating);
+    RunGeneratingMethod('TextFile + buffer', BufferedTextFileGenerating);
+    RunGeneratingMethod('CachedFileWriter', CachedFileWriterGenerating);
+    RunGeneratingMethod('CachedFileWriter directly', CachedFileWriterDirectlyGenerating);
+    RunGeneratingMethod('CachedWriter + FileStream', CachedStreamWriterGenerating);
+    RunGeneratingMethod('Stream + CachedFileWriter', CachedBufferStreamGenerating);
   except
     on EAbort do ;
 
     on E: Exception do
-    ConsoleWrite('%s: %s', [E.ClassName, E.Message]);
+    Writeln(E.ClassName, ': ', E.Message);
   end;
 
   if (ParamStr(1) <> '-nowait') then
   begin
     Writeln;
-    ConsoleWrite('Press Enter to quit', 0);
+    Write('Press Enter to quit');
     Readln;
   end;
 end.
