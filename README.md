@@ -1,23 +1,25 @@
 # CachedBuffers
-Библиотека незаменима для задач последовательного (пер. “sequential”) чтения или записи данных, особенно если требования к производительности повышены и данных много. Основу библиотеки составляют 2 главных класса модуля CachedBuffers.pas: `TCachedReader` и `TCachedWriter`. Функционал этих классов во многом повторяет стандартный класс `TStream`, однако отличие состоит в том, что используется удобный временный (пер. “temporary”) буфер памяти. Данная архитектура позволяет осуществлять прямой (пер. “direct”) доступ к памяти и увеличить производительность за счёт обхода виртуальных функций (пер. “virtual functions”), универсальных реализаций (пер. “universal implementations”) и особенностей API операционных систем. Пример использования библиотеки и иллюстрацию высокой производительности можно увидеть в демонстрационных проектах.
-![](http://dmozulyov.ucoz.net/CachedBuffers/screenshots.png)
+The library is irreplaceable for the tasks of sequential data reading or writing, especially if the requirements for the performance are increased and there are much data. The library is based on two main classes of the module CachedBuffers.pas:  `TCachedReader` and `TCachedWriter`. The functionality of these two classes largely repeats the standard `TStream` class, but the difference is that you are using a convenient temporary memory buffer. Such architecture makes it possible to give the direct access to the memory and to increase productivity avoid calling virtual functions, universal implementations and API features of operating systems. An example of usage of the library and the illustration of a high performance can be seen in the demonstration projects.
 
-Классы `TCachedReader` и `TCachedWriter` предполагают указание калбека (пер. “callback”) для заполнения или сохранения буфера. Однако библиотека уже содержит несколько стандартных классов, помогающих решать распространённые задачи: `TCachedFileReader`, `TCachedFileWriter`, `TCachedMemoryReader`, `TCachedMemoryWriter` и `TCachedResourceReader`, в будущем возможно будут стандартные классы для взаимодействия с сетью (пер. “network”).
+[Demo.zip]( http://dmozulyov.ucoz.net/CachedBuffers/Demo.zip)
+![](http://dmozulyov.ucoz.net/CachedBuffers/ScreenShots.png)
 
-Библиотека содержит так же классы `TCachedReReader` и `TCachedReWriter`, выполняющие роль промежуточных звеньев. Необходимость в этих классах возникает тогда, когда данные последовательно (пер. “sequentially”) конвертируются из одного формата в другой. Например ваш парсер принимает данные (`TCachedReader`) в кодировке UTF-16LE, и если открытый файл (`TCachedFileReader`) записан в другой кодировке - потребуется промежуточное звено (`TCachedReReader`), выполняющее конвертацию в UTF-16LE. Другим ярким примером промежуточного звена является компрессия или декомпрессия данных библиотекой ZLib.
+The `TCachedReader` and `TCachedWriter` classes are supposed to indicate a callback in order to fulfill or commit a buffer.  However, the library already contains a several standard classes which help to perform distributed tasks: `TCachedFileReader`, `TCachedFileWriter`, `TCachedMemoryReader`, `TCachedMemoryWriter` and `TCachedResourceReader`. In the future there also may be standard classes for the network interaction.
 
-В модуле CachedStreams.pas находятся классы, осуществляющие взаимодействие между `TCachedReader`, `TCachedWriter` и `TStream`. Класс `TCachedStreamReader` - это наследник `TCachedReader`, читающий `TStream`. `TCachedStreamWriter` - наследник `TCachedWriter`, пишущий в `TStream`. `TCachedBufferStream` - наследник `TStream`, использующий `TCachedReader` или `TCachedWriter`. `TCachedBufferAdapter` поддерживает OLE interface `IStream` для взаимодействия с `TCachedReader` или `TCachedWriter`.
+The library also contains `TCachedReReader` and `TCachedReWriter` classes which serve to be intermediate members. Those classes are necessary when the data is sequentially converted from one format to another. For example, if your parser receives data  (`TCachedReader`) in the UTF-16LE encoding and an open file (`TCachedFileReader`) is written in another encoding, then you will need an intermediate member (`TCachedReReader`) processing the conversion into UTF-16LE. Another striking example of an intermediate member is the ZLib library data compression and decompression.
 
-В качестве бонуса в модуле CachedBuffers.pas доступна функция `NcMove`, которая в среднем вдвое быстрее стардартной `Move`, но предназначена для непересекающихся областей памяти.
+All the classes interacting among `TCachedReader`, `TCachedWriter` and `TStream` are located in CachedStreams.pas module. The `TCachedStreamReader` class (the heir of the `TCachedReader`) can read from `TStream` instance. The `TCachedStreamWriter` (the heir of the `TCachedWriter`) can write to `TStream` instance. The `TCachedBufferStream` (the heir of the `TStream`) uses `TCachedReader` or `TCachedWriter`. The `TCachedBufferAdapter` support the OLE interface `IStream` for the interaction with  the `TCachedReader` or `TCachedWriter`.
+
+As a bonus there is an `NcMove` function accessible in the CachedBuffers.pas module which on the average is two times faster than the standard `Move` but which is designed for the non-overlapping memory areas.
 
 ##### TCachedBuffer
-`TCachedBuffer` это общий предок для `TCachedReader` и `TCachedWriter`. Главным свойством (пер. “property”) класса является `Memory` - выделенный буфер памяти, выровненный (пер. “aligned”) на 4kb, а так же имеющий `Previous` и `Additional` области, описание которых будет ниже. Размер буфера задаётся в конструкторе (пер. “constructor”), значение по-умолчанию (пер. “default value”) 64kb. Если размер не кратен 4kb, то размер автоматически выравнивается (например 5000 выровняется к 8192).
+The `TCachedBuffer` is a mutual ancestor for the `TCachedReader` and the `TCachedWriter`. The main class property is the `Memory`. It is a allocated memory buffer aligned to 4KB which also has `Previous` и `Additional` areas (the description will be given below). The size of the buffer is set in a constructor where the default value is 64KB. If the size is not multiple of 4KB then the size automatically align (e.g. 5000 aligns to 8192).
 ![](http://dmozulyov.ucoz.net/CachedBuffers/MemoryScheme.png)
 
-Для заполнения или чтения буфера используется пара `Current`/`Overflow`. `Current` указывает позицию в буфере и позволяет осуществлять прямой доступ к памяти, `Overflow` - верхняя граница буфера. `Margin` определяет количество байт, доступных в буфере (`Overflow - Current`). Функция `Flush`обновляет буфер и возвращает количество байт, доступных в буфере (`Margin`). Функция может вернуть 0 если чтение или запись окончены.
+To fill or read the buffer is used `Current`/`Overflow` pair. `Current` indicates the position in a buffer and allows the direct access to the memory. `Overflow` is an upper limit of the buffer. `Margin` defines the number of bytes accessible in a buffer (`Overflow - Current`). The `Flush` function updates the buffer and returns the number of bytes accessible in a buffer (`Margin`). The function may return 0 if the reading or writing is over. 
 
-Признаком окончания чтения или записи является свойство `EOF`, которое так же может устанавливаться в `true`. При желании можно ограничить размер чтения или записи, установив свойство `Limit`.
-```
+The `EOF` is an indication of the end of the reading or writing, which also may be set to `True`. If needed it is possible to limit the reading or writing size by setting the `Limit` value.
+```pascal
 TCachedBufferKind = (cbReader, cbWriter);
 TCachedBufferCallback = function(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt of object;
 TCachedBufferProgress = procedure(Sender: TCachedBuffer; var Cancel: Boolean) of object;
@@ -38,14 +40,14 @@ public
 end;
 ```
 ##### TCachedReader
-`TCachedReader` используется для последовательного (пер. “sequential”) чтения данных. Допускается прямое обращение с буфером при помощи свойств `Current`, `Overflow` и функции `Flush`, но для удобства можете воспользоваться высокоуровневыми (пер. “high-level”) `TStream`-like методами (пер. “method(s)”) `Read` и `ReadData`. Метод `Skip` позволяет пропустит определённое количество ненужных байт. Метод `Export` позволяет записать в `TCachedWriter` все или определённое количество байт данных.
+The `TCachedReader` is used for the sequential data reading. The direct use of a buffer is allowed with the `Current`, `Overflow` properties and `Flush` function but for convenience sake you may use high-level `TStream`-like methods `Read` and `ReadData`. The `Skip` method allows to pass through a certain number of useless bytes. The `Export` method allows to write whole or a certain number of data bytes in the `TCachedWriter`.
 
-Главным параметром конструктора (пер. “constructor”) является `Callback` - функция осуществляющая наполнение буфера. При чтении (`Read`) большого количества данных `Callback` может вызываться, минуя буфер. Если `Callback` возвращает меньше, чем указано в параметре `Size` - то флаг `Finishing` выставляется в `true` и при следуещем `Flush` чтение будет окончено (`EOF = true`).
+The main constructor’s parameter is a `Callback`. It is a function which fills the buffer. During reading much data the `Callback` may be called passing the buffer. If the `Callback` returns less than `Size` parameter then the `Finishing` flag is set to `True` and at the next `Flush` the reading will be over (`EOF = True`).
 
-Область `Memory.Additional` (`Overflow`) всегда больше 4kb и может служить для произвольных нужд чтения, главная из которох - избежание AccessViolation при специфичных алгоритмах парсинга данных. На момент `Flush` указатель `Current` может быть меньше `Overflow` - в этом случае остаток (пер. "margin data") переносится в область `Memory.Previous`. Это полезно например когда алгоритм предполагает обработку структуры (пер. "struct" или "data struct"), но в буфере она содержится не полностью. Аналогично при парсинге лексемы. Размер `Memory.Previous` области минимум 4kb и автоматически увеличивается при необходимости в момент `Flush`. Однако если указатель `Current` больше `Overflow` - будет вызвано исключение (пер. "throw (an) exception").
+The `Memory.Additional` (`Overflow`) area is always bigger than 4KB and may also serve for any reading needs the main of which is an AccessViolation avoidance with specific algorithms of data parsing. At the `Flush` moment the `Current` pointer may be less than `Overflow`. In this case the margin data is transferred to the `Memory.Previous` area. For example it is useful when the algorithm offers the struct processing and it is not fully stored in the buffer. The same is with lexeme parsing. The size of `Memory.Previous` area is minimum 4KB and when necessary it automatically grows during the `Flush` moment. But if the `Current` pointer is bigger than `Overflow` an exception will be thrown.
 
-Функция `DirectRead` позволяет прочитать данные из произвольного места, даже минуя буфер. Некоторые экземпляры (пер. "instances") `TCachedReader` позволяют обращаться к произвольным частям, например файлы или участки памяти. Если обращение к произвольным частям не поддерживается - будьте осторожны. При чтении "до" буфера - возникнет исключение. При чтении "после" буфера - буфер будет увеличен до требуемого размера, что может привести к нехватке памяти.
-```
+The `DirectRead` procedure allows data reading from a random place even without the buffer memory.  Some instances of the `TCachedReader` allow addressing to random places (e.g. files or memory). If the addressing to random places is not supported, better be careful. While reading "before" the buffer an exception will throw. While reading "after" the buffer, it will be enlarged to the necessary size what can lead to memory shortage.
+```pascal
 TCachedReader = class(TCachedBuffer)
 public
   constructor Create(const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
@@ -81,15 +83,15 @@ public
 end;
 ```
 ##### TCachedWriter
-`TCachedWriter` используется для последовательной (пер. “sequential”) записи данных. У класса всего несколько отличий от `TCachedReader`.
+The `TCachedWriter` is used for the sequential data writing. The class has only several differences from the `TCachedReader`.
 
-Размер `Memory.Previous` области может быть равен 0, поэтому не стоит писать что-либо "до" буфера. Размер `Memory.Additional` (`Overflow`) области минимум 4kb. Допускается запись в эту область (`Current` больше `Overflow`), тогда при следующем `Flush` остаток (пер. наверное “overflow(ed) data”) будет перемещён в начало буфера. Если на момент `Flush` указатель `Current` меньше `Overflow` - запись считается оконченной и `EOF` устанавливается в `true`.
-```
+The size of the `Memory.Previous` area may be equal 0 that is why do not write anything “before” the buffer. The size of the `Memory.Additional` (`Overflow`) is minimum 4KB. A writing in this area is permitted (`Current` is bigger than `Overflow`) and then at the next `Flush` an overflowed data will be transferred to the beginning of the buffer. If while `Flush` the `Current` pointer is less than `Overflow` then the writing is considered to be over and the `EOF` is set to `True`.
+```pascal
 TCachedWriter = class(TCachedBuffer)
 public
   constructor Create(const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
   procedure DirectWrite(const Position: Int64; const Buffer; const Count: NativeUInt);
-  procedure Import(const Reader: TCachedReder; const Count: NativeUInt = 0);
+  procedure Import(const Reader: TCachedReader; const Count: NativeUInt = 0);
 
   procedure Write(const Buffer; const Count: NativeUInt);
   procedure WriteData(const Value: Boolean);    
@@ -118,8 +120,8 @@ public
 end;
 ```
 ##### TCachedReReader
-`TCachedReReader` выступает в качестве промежуточного звена в задачах чтения, где требуется последовательное конвертирование данных из одного формата в другой. Если на момент деструктора (пер. "destructor") `Owner` выставлен в `true`, то `Source` тоже удаляется. **Обратите внимание**, в момент вызова `Callback` в качестве `Sender` выступает сам `TCachedReReader`, а не `Source`.
-```
+The `TCachedReReader` is an intermediate member in reading tasks where a sequential data converting from one format to another is required. If during "destructor" the `Owner` is `True` then the `Source` is destroyed too. **Pay attention** to the fact that while calling the `Callback` the `TCachedReReader` itself is a `Sender` parameter but not the `Source`.
+```pascal
 TCachedReReader = class(TCachedReader)  
 public
   constructor Create(const Callback: TCachedBufferCallback; const Source: TCachedReader; const Owner: Boolean = False; const BufferSize: NativeUInt = 0);
@@ -128,8 +130,8 @@ public
 end;
 ```
 ##### TCachedReWriter
-`TCachedReWriter` выступает в качестве промежуточного звена в задачах записи, где требуется последовательное конвертирование данных из одного формата в другой. Если на момент деструктора (пер. "destructor") `Owner` выставлен в `true`, то `Target` тоже удаляется. **Обратите внимание**, в момент вызова `Callback` в качестве `Sender` выступает сам `TCachedReWriter`, а не `Target`.
-```
+The `TCachedReWriter` is an intermediate member in writing tasks where a sequential data converting from one format to another is required. If during "destructor" the `Owner` is `True` then the `Target` is destroyed too. **Pay attention** to the fact that while calling the `Callback` the `TCachedReWriter` itself is a `Sender` parameter but not the `Target`.
+```pascal
 TCachedReWriter = class(TCachedWriter)
 public
   constructor Create(const Callback: TCachedBufferCallback; const Target: TCachedWriter; const Owner: Boolean = False; const BufferSize: NativeUInt = 0);
@@ -138,50 +140,56 @@ public
 end;
 ```
 ##### TCachedFileReader
-`TCachedFileReader` - стандартный класс, предназначенный для чтения файлов или их части. Стандартный размер буфера равен 256kb. Свойство `Limit` уставливается (пер. "set") автоматически и равно размеру файла или указаному параметру `Size`.
-```
+The `TCachedFileReader` is a standard class designed for files reading of their parts. A standard buffer size equals 256KB. The `Limit` property is automatically set and equals the size of the file or the `Size` parameter.
+```pascal
 TCachedFileReader = class(TCachedReader)
 public
   constructor Create(const FileName: string; const Offset: Int64 = 0; const Size: Int64 = 0);
   constructor CreateHandled(const Handle: THandle; const Size: Int64 = 0; const HandleOwner: Boolean = False);
+  property FileName: string read
   property Handle: THandle read
   property HandleOwner: Boolean read/write
+  property Offset: Int64 read
 end;
 ```
 ##### TCachedFileWriter
-`TCachedFileWriter` - стандартный класс, предназначенный для записи файлов или их части. Стандартный размер буфера равен 256kb. Свойство `Limit` уставливается (пер. "set") если указан параметр `Size`.
-```
+The `TCachedFileWriter` is a standard class designed for files writing or their parts. A standard buffer size equals 256KB. The `Limit` parameter is set if the `Size` parameter is defined.
+```pascal
 TCachedFileWriter = class(TCachedWriter)
 public
   constructor Create(const FileName: string; const Size: Int64 = 0); 
   constructor CreateHandled(const Handle: THandle; const Size: Int64 = 0; const HandleOwner: Boolean = False);
+  property FileName: string read
   property Handle: THandle read
   property HandleOwner: Boolean read/write
+  property Offset: Int64 read
 end;
 ```
 ##### TCachedMemoryReader
-`TCachedMemoryReader` - стандартный класс, предназначенный для совместимости с `TCachedReader` и чтения из заранее известного участка памяти. Свойство `Limit` автоматически уставливается (пер. "set") и равно `Size`.
-```
+`TCachedMemoryReader` is a standard class designed for compatibility of the `TCachedReader` with the reading from a fixed memory area.  The `Limit` property is automatically set and it equals `Size`.
+```pascal
 TCachedMemoryReader = class(TCachedReader)
 public
   constructor Create(const Ptr: Pointer; const Size: NativeUInt);
   property Ptr: Pointer read
+  property Size: NativeUInt read
 end;
 ```
 ##### TCachedMemoryWriter
-`TCachedMemoryWriter` - стандартный класс, предназначенный для совместимости с `TCachedWriter` и записи во временную память или разранее известный участок. В случае `CreateTemporary` память `Ptr` перевыделяется (пер. "resize(ing)") при каждом `Flush`.
-```
+`TCachedMemoryWriter` is a standard class designed for compatibility of the `TCachedWriter` with the writing to the temporary or fixed memory area. If it is a `CreateTemporary` then the `Ptr` memory resizes with every `Flush` calling.
+```pascal
 TCachedMemoryWriter = class(TCachedWriter)
 public
   constructor Create(const Ptr: Pointer; const Size: NativeUInt);
   constructor CreateTemporary;
   property Temporary: Boolean read
   property Ptr: Pointer read
+  property Size: NativeUInt read
 end;
 ```
 ##### TCachedResourceReader
-`TCachedResourceReader` - стандартный класс, предназначенный для совместимости с `TCachedReader` и чтения ресурсов, повторяет интерфейс `Classes.TResourceStream`. Доступен только под операционной системой Windows.
-```
+`TCachedResourceReader` is a standard class designed for compatibility of the `TCachedReader` with the reading of the resources. It repeats interface of the `Classes.TResourceStream`. It is accessible only on Windows platform.
+```pascal
 TCachedResourceReader = class(TCachedMemoryReader)
 public
   constructor Create(Instance: THandle; const ResName: string; ResType: PChar);
