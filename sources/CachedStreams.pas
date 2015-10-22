@@ -1,7 +1,7 @@
 unit CachedStreams;
 
 {******************************************************************************}
-{ Copyright (c) 2013-2015 Dmitry Mozulyov                                      }
+{ Copyright (c) 2013 Dmitry Mozulyov                                           }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -29,8 +29,8 @@ unit CachedStreams;
 
 // compiler directives
 {$ifdef FPC}
-  {$mode Delphi}
-  {$asmmode Intel}
+  {$mode delphi}
+  {$asmmode intel}
   {$define INLINESUPPORT}
   {$ifdef CPU386}
     {$define CPUX86}
@@ -47,11 +47,13 @@ unit CachedStreams;
     {$WARN UNSAFE_TYPE OFF}
     {$WARN UNSAFE_CAST OFF}
   {$ifend}
-  {$if (CompilerVersion < 23)}
-    {$define CPUX86}
-  {$ifend}
-  {$if (CompilerVersion >= 17)}
+  {$if CompilerVersion >= 17}
     {$define INLINESUPPORT}
+  {$ifend}
+  {$if CompilerVersion < 23}
+    {$define CPUX86}
+  {$else}
+    {$define UNITSCOPENAMES}
   {$ifend}
   {$if CompilerVersion >= 21}
     {$WEAKLINKRTTI ON}
@@ -77,13 +79,24 @@ unit CachedStreams;
 
 
 interface
-  uses {$ifdef MSWINDOWS}Windows, ActiveX,{$endif}
-       Types, CachedBuffers,
+  uses {$ifdef UNITSCOPENAMES}System.Types{$else}Types{$endif},
+       {$ifdef MSWINDOWS}
+         {$ifdef UNITSCOPENAMES}
+           Winapi.Windows, Winapi.ActiveX,
+         {$else}
+           Windows, ActiveX,
+         {$endif}
+       {$endif}
        {$ifdef KOL}
-         KOL, err
+         KOL, err,
        {$else}
-         SysUtils, Classes
-       {$endif};
+         {$ifdef UNITSCOPENAMES}
+           System.SysUtils, System.Classes,
+         {$else}
+           SysUtils, Classes,
+         {$endif}
+       {$endif}
+       CachedBuffers;
 
 type
   // standard types

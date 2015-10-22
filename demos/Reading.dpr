@@ -6,6 +6,9 @@ program Reading;
 {$if CompilerVersion >= 24}
   {$LEGACYIFEND ON}
 {$ifend}
+{$if CompilerVersion >= 23}
+  {$define UNITSCOPENAMES}
+{$ifend}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
 {$ifndef VER140}
   {$WARN UNSAFE_CODE OFF}
@@ -14,8 +17,13 @@ program Reading;
 {$endif}
 {$O+}{$R-}{$I-}{$Q-}{$W-}
 
-uses
-  Windows, SysUtils, Classes, CachedBuffers;
+uses {$ifdef UNITSCOPENAMES}
+       Winapi.Windows, System.SysUtils, System.Classes,
+     {$else}
+       Windows, SysUtils, Classes,
+     {$endif}
+     CachedBuffers;
+
 
 // native ordinal types
 {$if (not Defined(FPC)) and (CompilerVersion < 22)}

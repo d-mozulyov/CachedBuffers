@@ -3,12 +3,10 @@ unit TestUnit;
 {$i crystal_options.inc}
 
 interface
-  uses
-  {$ifdef MSWINDOWS}
-  Windows,
-  {$endif}
-  SysUtils,
-  CachedBuffers;
+  uses {$ifdef UNITSCOPENAMES}System.SysUtils{$else}SysUtils{$endif},
+       {$ifdef MSWINDOWS}{$ifdef UNITSCOPENAMES}Winapi.Windows{$else}Windows{$endif}{$endif},
+       CachedBuffers,
+       CachedStreams;
 
 
 
@@ -33,7 +31,7 @@ begin
   BreakPoint := S;
 
   {$ifdef MSWINDOWS}
-    Windows.MessageBox(0, PChar(BreakPoint), 'Сообщение:', 0);
+    {$ifdef UNITSCOPENAMES}Winapi.{$endif}Windows.MessageBox(0, PChar(BreakPoint), 'Сообщение:', 0);
   {$endif}
 
   Halt;
