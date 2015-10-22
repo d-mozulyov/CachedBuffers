@@ -29,8 +29,8 @@ unit CachedBuffers;
 
 // compiler directives
 {$ifdef FPC}
-  {$mode Delphi}
-  {$asmmode Intel}
+  {$mode delphi}
+  {$asmmode intel}
   {$define INLINESUPPORT}
   {$ifdef CPU386}
     {$define CPUX86}
@@ -47,10 +47,10 @@ unit CachedBuffers;
     {$WARN UNSAFE_TYPE OFF}
     {$WARN UNSAFE_CAST OFF}
   {$ifend}
-  {$if (CompilerVersion >= 17)}
+  {$if CompilerVersion >= 17}
     {$define INLINESUPPORT}
   {$ifend}
-  {$if (CompilerVersion < 23)}
+  {$if CompilerVersion < 23}
     {$define CPUX86}
   {$else}
     {$define UNITSCOPENAMES}
