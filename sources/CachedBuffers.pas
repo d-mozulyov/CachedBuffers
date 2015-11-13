@@ -80,7 +80,7 @@ unit CachedBuffers;
 
 interface
   uses {$ifdef UNITSCOPENAMES}System.Types{$else}Types{$endif},
-       {$ifdef MSWINDOWS}{$ifdef UNITSCOPENAMES}Winapi.Windows{$else}Windows{$endif}{$endif},
+       {$ifdef MSWINDOWS}{$ifdef UNITSCOPENAMES}Winapi.Windows{$else}Windows{$endif},{$endif}
        {$ifdef POSIX}Posix.String_, Posix.SysStat, Posix.Unistd,{$endif}
        {$ifdef KOL}
          KOL, err
@@ -157,6 +157,7 @@ type
     FCallback: TCachedBufferCallback;
     FOnProgress: TCachedBufferProgress;
 
+    function GetOptimalBufferSize(const Value, DefValue: NativeUInt; const ALimit: Int64 = 0): NativeUInt;
     function GetMargin: NativeInt; {$ifdef INLINESUPPORT}inline;{$endif}
     function GetPosition: Int64; {$ifdef INLINESUPPORT}inline;{$endif}
     procedure SetEOF(const Value: Boolean);
@@ -598,24 +599,6 @@ begin
   {$endif}
 end;
 
-function OptimalFileBufferSize(const Size: Int64): NativeUInt;
-var
-  KB: NativeUInt;
-begin
-  Result := DEFAULT_CACHED_FILE_SIZE;
-  if (Size > 0) and (Size < (DEFAULT_CACHED_FILE_SIZE + DEFAULT_CACHED_FILE_SIZE div 4)) then
-  begin
-    KB := (NativeUInt(Size) + 1023) shr 10;
-    case KB of
-       0..32: Result := ((KB + 3) and -4) * 1024;
-      33..96: Result  := 32 * 1024;
-     97..192: Result  := 64 * 1024;
-    else
-      Result := 128 * 1024;
-    end;
-  end;
-end;
-
 function DirectCachedFileMethod(const Instance: TCachedBuffer;
   const InstanceHandle: THandle; const InstanceOffset, Position: Int64;
   const Data: PByte; const Size: NativeUInt): Boolean;
@@ -640,6 +623,35 @@ end;
 
 
 { TCachedBuffer }
+
+function TCachedBuffer.GetOptimalBufferSize(const Value, DefValue: NativeUInt;
+  const ALimit: Int64): NativeUInt;
+var
+  Size: NativeUInt;
+begin
+  if (Value <> 0) then
+  begin
+    Result := Value;
+    if (ALimit > 0) and (Result > ALimit) then Result := ALimit;
+    Exit;
+  end;
+
+  if (ALimit <= 0) or (ALimit >= (DefValue * 4)) then
+  begin
+    Result := DefValue;
+    Exit;
+  end;
+
+  Size := ALimit;
+  Size := Size shr 2;
+  if (Size = 0) then
+  begin
+    Result := MEMORY_PAGE_SIZE;
+  end else
+  begin
+    Result := (Size + MEMORY_PAGE_SIZE - 1) and -MEMORY_PAGE_SIZE;
+  end;
+end;
 
 constructor TCachedBuffer.Create(const Kind: TCachedBufferKind;
   const Callback: TCachedBufferCallback; const BufferSize: NativeUInt);
@@ -2833,7 +2845,7 @@ constructor TCachedReReader.Create(const Callback: TCachedBufferCallback;
 begin
   FSource := Source;
   FOwner := Owner;
-  inherited Create(Callback, BufferSize);
+  inherited Create(Callback, GetOptimalBufferSize(BufferSize, DEFAULT_CACHED_SIZE, Source.Limit));
 end;
 
 destructor TCachedReReader.Destroy;
@@ -2852,7 +2864,7 @@ constructor TCachedReWriter.Create(const Callback: TCachedBufferCallback;
 begin
   FTarget := Target;
   FOwner := Owner;
-  inherited Create(Callback, BufferSize);
+  inherited Create(Callback, GetOptimalBufferSize(BufferSize, DEFAULT_CACHED_SIZE, Target.Limit));
 end;
 
 destructor TCachedReWriter.Destroy;
@@ -2913,7 +2925,7 @@ begin
   begin
     if (Size > 0) and (Size < FileSize) then FileSize := Size;
 
-    inherited Create(InternalCallback, OptimalFileBufferSize(FileSize));
+    inherited Create(InternalCallback, GetOptimalBufferSize(0, DEFAULT_CACHED_FILE_SIZE, FileSize));
     Limit := FileSize;
   end;
 end;
@@ -2991,7 +3003,7 @@ begin
   if (FHandle = INVALID_HANDLE_VALUE) or (FOffset < 0) then
     raise ECachedBuffer.Create('Invalid file handle');
 
-  inherited Create(InternalCallback, OptimalFileBufferSize(Size));
+  inherited Create(InternalCallback, GetOptimalBufferSize(0, DEFAULT_CACHED_FILE_SIZE, Size));
   if (Size > 0) then
     Limit := Size;
 end;
@@ -3041,8 +3053,6 @@ end;
 
 constructor TCachedMemoryReader.Create(const Ptr: Pointer;
   const Size: NativeUInt);
-var
-  BufferSize: NativeUInt;
 begin
   FPtr := Ptr;
   FSize := Size;
@@ -3054,10 +3064,7 @@ begin
     EOF := True;
   end else
   begin
-    BufferSize := 0;
-    if (Size < DEFAULT_CACHED_SIZE) then BufferSize := Size;
-
-    inherited Create(InternalCallback, BufferSize);
+    inherited Create(InternalCallback, GetOptimalBufferSize(0, DEFAULT_CACHED_SIZE, Size));
     Limit := Size;
   end;
 end;
@@ -3082,8 +3089,6 @@ end;
 
 constructor TCachedMemoryWriter.Create(const Ptr: Pointer;
   const Size: NativeUInt);
-var
-  BufferSize: NativeUInt;
 begin
   FPtr := Ptr;
   FSize := Size;
@@ -3095,10 +3100,7 @@ begin
     EOF := True;
   end else
   begin
-    BufferSize := 0;
-    if (Size < DEFAULT_CACHED_SIZE) then BufferSize := Size;
-
-    inherited Create(InternalCallback, BufferSize);
+    inherited Create(InternalCallback, GetOptimalBufferSize(0, DEFAULT_CACHED_SIZE, Size));
     Limit := Size;
   end;
 end;

@@ -4,7 +4,7 @@ unit TestUnit;
 
 interface
   uses {$ifdef UNITSCOPENAMES}System.SysUtils{$else}SysUtils{$endif},
-       {$ifdef MSWINDOWS}{$ifdef UNITSCOPENAMES}Winapi.Windows{$else}Windows{$endif}{$endif},
+       {$ifdef MSWINDOWS}{$ifdef UNITSCOPENAMES}Winapi.Windows{$else}Windows{$endif},{$endif}
        CachedBuffers,
        CachedStreams;
 
