@@ -165,8 +165,8 @@ type
     FOnProgress: TCachedBufferProgress;
 
     function GetOptimalBufferSize(const Value, DefValue: NativeUInt; const ALimit: Int64 = 0): NativeUInt;
-    function GetMargin: NativeInt; {$ifdef INLINESUPPORT}inline;{$endif}
-    function GetPosition: Int64; {$ifdef INLINESUPPORT}inline;{$endif}
+    function GetMargin: NativeInt; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    function GetPosition: Int64; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure SetEOF(const Value: Boolean);
     procedure SetLimit(const Value: Int64);
     function CheckLimit(const Value: Int64): Boolean; virtual;
@@ -210,32 +210,32 @@ type
     constructor Create(const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
     procedure DirectRead(const Position: Int64; var Buffer; const Count: NativeUInt);
     property Finishing: Boolean read FFinishing;
-    procedure Skip(const Count: NativeUInt); {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure Export(const Writer: TCachedWriter; const Count: NativeUInt = 0); {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure Skip(const Count: NativeUInt); {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure Export(const Writer: TCachedWriter; const Count: NativeUInt = 0); {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
 
     // TStream-like data reading
     procedure Read(var Buffer; const Count: NativeUInt);
-    procedure ReadData(var Value: Boolean); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure ReadData(var Value: Boolean); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifNdef NEXTGEN}
-    procedure ReadData(var Value: AnsiChar); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure ReadData(var Value: AnsiChar); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$endif}
-    procedure ReadData(var Value: WideChar); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: ShortInt); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: Byte); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: SmallInt); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: Word); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: Integer); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: Cardinal); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: Int64); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure ReadData(var Value: WideChar); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: ShortInt); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: Byte); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: SmallInt); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: Word); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: Integer); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: Cardinal); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: Int64); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$if Defined(FPC) or (CompilerVersion >= 15)}
-    procedure ReadData(var Value: UInt64); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure ReadData(var Value: UInt64); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifend}
-    procedure ReadData(var Value: Single); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: Double); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: TExtended80Rec); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: Currency); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: TPoint); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure ReadData(var Value: TRect); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure ReadData(var Value: Single); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: Double); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: TExtended80Rec); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: Currency); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: TPoint); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: TRect); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifNdef NEXTGEN}
     procedure ReadData(var Value: ShortString); overload;
     procedure ReadData(var Value: AnsiString{$ifdef INTERNALCODEPAGE}; CodePage: Word = 0{$endif}); overload;
@@ -263,36 +263,36 @@ type
 
     // TStream-like data writing
     procedure Write(const Buffer; const Count: NativeUInt);
-    procedure WriteData(const Value: Boolean); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure WriteData(const Value: Boolean); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifNdef NEXTGEN}
-    procedure WriteData(const Value: AnsiChar); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure WriteData(const Value: AnsiChar); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$endif}
-    procedure WriteData(const Value: WideChar); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: ShortInt); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: Byte); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: SmallInt); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: Word); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: Integer); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: Cardinal); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: Int64); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure WriteData(const Value: WideChar); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: ShortInt); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: Byte); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: SmallInt); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: Word); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: Integer); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: Cardinal); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: Int64); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$if Defined(FPC) or (CompilerVersion >= 15)}
-    procedure WriteData(const Value: UInt64); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure WriteData(const Value: UInt64); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifend}
-    procedure WriteData(const Value: Single); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: Double); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: TExtended80Rec); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: Currency); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: TPoint); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: TRect); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure WriteData(const Value: Single); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: Double); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: TExtended80Rec); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: Currency); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: TPoint); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: TRect); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifNdef NEXTGEN}
-    procedure WriteData(const Value: ShortString); overload; {$ifdef INLINESUPPORT}inline;{$endif}
-    procedure WriteData(const Value: AnsiString); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure WriteData(const Value: ShortString); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: AnsiString); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: WideString); overload;
     {$endif}
     {$ifdef UNICODE}
-    procedure WriteData(const Value: UnicodeString); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure WriteData(const Value: UnicodeString); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$endif}
-    procedure WriteData(const Value: TBytes); overload; {$ifdef INLINESUPPORT}inline;{$endif}
+    procedure WriteData(const Value: TBytes); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: Variant); overload;
   end;
 
