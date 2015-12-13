@@ -32,6 +32,7 @@ unit CachedStreams;
   {$mode delphi}
   {$asmmode intel}
   {$define INLINESUPPORT}
+  {$define INLINESUPPORTSIMPLE}
   {$ifdef CPU386}
     {$define CPUX86}
   {$endif}
@@ -47,8 +48,11 @@ unit CachedStreams;
     {$WARN UNSAFE_TYPE OFF}
     {$WARN UNSAFE_CAST OFF}
   {$ifend}
-  {$if CompilerVersion >= 17}
+  {$if CompilerVersion >= 20}
     {$define INLINESUPPORT}
+  {$ifend}
+  {$if CompilerVersion >= 17}
+    {$define INLINESUPPORTSIMPLE}
   {$ifend}
   {$if CompilerVersion < 23}
     {$define CPUX86}
@@ -76,6 +80,9 @@ unit CachedStreams;
 {$ifdef KOL_MCK}
   {$define KOL}
 {$endif}
+{$if Defined(FPC) or (CompilerVersion >= 18)}
+  {$define OPERATORSUPPORT}
+{$ifend}
 
 
 interface
@@ -107,7 +114,7 @@ type
       UInt64 = Int64;
       PUInt64 = ^UInt64;
     {$ifend}
-    {$if CompilerVersion < 19}
+    {$if CompilerVersion < 21}
       NativeInt = Integer;
       NativeUInt = Cardinal;
     {$ifend}

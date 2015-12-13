@@ -28,7 +28,7 @@ uses {$ifdef UNITSCOPENAMES}
 // native ordinal types
 {$if (not Defined(FPC)) and (CompilerVersion < 22)}
 type
-  {$if CompilerVersion < 19}
+  {$if CompilerVersion < 21}
   NativeInt = Integer;
   NativeUInt = Cardinal;
   {$ifend}

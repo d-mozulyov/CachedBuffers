@@ -32,6 +32,7 @@ unit CachedBuffers;
   {$mode delphi}
   {$asmmode intel}
   {$define INLINESUPPORT}
+  {$define INLINESUPPORTSIMPLE}
   {$ifdef CPU386}
     {$define CPUX86}
   {$endif}
@@ -47,8 +48,11 @@ unit CachedBuffers;
     {$WARN UNSAFE_TYPE OFF}
     {$WARN UNSAFE_CAST OFF}
   {$ifend}
-  {$if CompilerVersion >= 17}
+  {$if CompilerVersion >= 20}
     {$define INLINESUPPORT}
+  {$ifend}
+  {$if CompilerVersion >= 17}
+    {$define INLINESUPPORTSIMPLE}
   {$ifend}
   {$if CompilerVersion < 23}
     {$define CPUX86}
@@ -76,6 +80,9 @@ unit CachedBuffers;
 {$ifdef KOL_MCK}
   {$define KOL}
 {$endif}
+{$if Defined(FPC) or (CompilerVersion >= 18)}
+  {$define OPERATORSUPPORT}
+{$ifend}
 
 
 interface
@@ -97,7 +104,7 @@ type
       UInt64 = Int64;
       PUInt64 = ^UInt64;
     {$ifend}
-    {$if CompilerVersion < 19}
+    {$if CompilerVersion < 21}
       NativeInt = Integer;
       NativeUInt = Cardinal;
     {$ifend}
@@ -195,7 +202,7 @@ type
 
   TCachedReader = class(TCachedBuffer)
   protected
-    procedure OverflowRead(Data: PByte; Size: NativeUInt);
+    procedure OverflowRead(var Buffer; Size: NativeUInt);
     function DoDirectPreviousRead(Position: Int64; Data: PByte; Size: NativeUInt): Boolean; virtual;
     function DoDirectFollowingRead(Position: Int64; Data: PByte; Size: NativeUInt): Boolean; virtual;
     procedure OverflowSkip(Size: NativeUInt);
@@ -246,7 +253,7 @@ type
 
   TCachedWriter = class(TCachedBuffer)
   protected
-    procedure OverflowWrite(Data: PByte; Size: NativeUInt);
+    procedure OverflowWrite(const Buffer; Size: NativeUInt);
     function DoDirectPreviousWrite(Position: Int64; Data: PByte; Size: NativeUInt): Boolean; virtual;
     function DoDirectFollowingWrite(Position: Int64; Data: PByte; Size: NativeUInt): Boolean; virtual;
   public
@@ -993,7 +1000,7 @@ begin
 
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowWrite(@Buffer, Count);
+    OverflowWrite(Buffer, Count);
   end else
   begin
     Current := P;
@@ -1050,7 +1057,7 @@ begin
 
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(@Buffer, Count);
+    OverflowRead(Buffer, Count);
   end else
   begin
     Current := P;
@@ -1682,11 +1689,14 @@ begin
 end;
 
 // Margin < Size
-procedure TCachedReader.OverflowRead(Data: PByte; Size: NativeUInt);
+procedure TCachedReader.OverflowRead(var Buffer; Size: NativeUInt);
 var
+  Data: PByte;
   S: NativeUInt;
   Margin: NativeUInt;
 begin
+  Data := Pointer(@Buffer);
+
   // last time failure reading
   if (NativeUInt(Current) > NativeUInt(FOverflow)) then
     RaiseReading;
@@ -1756,7 +1766,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1774,7 +1784,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1792,7 +1802,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1809,7 +1819,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1826,7 +1836,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1843,7 +1853,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1860,7 +1870,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1877,7 +1887,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1894,7 +1904,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1911,7 +1921,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1929,7 +1939,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1947,7 +1957,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1964,7 +1974,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1981,7 +1991,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -1998,7 +2008,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -2015,7 +2025,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -2032,7 +2042,7 @@ begin
   Inc(P);
   if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
   begin
-    OverflowRead(Pointer(@Value), SizeOf(Value));
+    OverflowRead(Value, SizeOf(Value));
   end else
   begin
     Pointer(Current) := P;
@@ -2412,11 +2422,14 @@ begin
 end;
 
 // Margin < Size
-procedure TCachedWriter.OverflowWrite(Data: PByte; Size: NativeUInt);
+procedure TCachedWriter.OverflowWrite(const Buffer; Size: NativeUInt);
 var
+  Data: PByte;
   S: NativeUInt;
   Margin: NativeInt;
 begin
+  Data := Pointer(@Buffer);
+
   // limit test
   if (FLimited) and (Self.Position + Size > FLimit) then
     RaiseWriting;
