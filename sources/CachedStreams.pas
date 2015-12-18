@@ -123,10 +123,6 @@ type
       PNativeUInt = ^NativeUInt;
     {$ifend}
   {$endif}
-  {$if Defined(FPC) or (CompilerVersion < 23)}
-  TExtended80Rec = Extended;
-  PExtended80Rec = ^TExtended80Rec;
-  {$ifend}
   TBytes = array of Byte;
   PBytes = ^TBytes;
 

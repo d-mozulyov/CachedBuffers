@@ -113,10 +113,6 @@ type
       PNativeUInt = ^NativeUInt;
     {$ifend}
   {$endif}
-  {$if Defined(FPC) or (CompilerVersion < 23)}
-  TExtended80Rec = Extended;
-  PExtended80Rec = ^TExtended80Rec;
-  {$ifend}
   TBytes = array of Byte;
   PBytes = ^TBytes;
 
@@ -232,7 +228,10 @@ type
     {$ifend}
     procedure ReadData(var Value: Single); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure ReadData(var Value: Double); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure ReadData(var Value: Extended); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$if not Defined(FPC) and (CompilerVersion >= 23)}
     procedure ReadData(var Value: TExtended80Rec); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$ifend}
     procedure ReadData(var Value: Currency); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure ReadData(var Value: TPoint); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure ReadData(var Value: TRect); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
@@ -280,7 +279,10 @@ type
     {$ifend}
     procedure WriteData(const Value: Single); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: Double); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    procedure WriteData(const Value: Extended); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$if not Defined(FPC) and (CompilerVersion >= 23)}
     procedure WriteData(const Value: TExtended80Rec); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$ifend}
     procedure WriteData(const Value: Currency); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: TPoint); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: TRect); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
@@ -1983,6 +1985,24 @@ begin
   end;
 end;
 
+procedure TCachedReader.ReadData(var Value: Extended);
+var
+  P: ^Extended;
+begin
+  P := Pointer(Current);
+  Inc(P);
+  if (NativeUInt(P) > NativeUInt(Self.FOverflow)) then
+  begin
+    OverflowRead(Value, SizeOf(Value));
+  end else
+  begin
+    Pointer(Current) := P;
+    Dec(P);
+    Value := P^;
+  end;
+end;
+
+{$if not Defined(FPC) and (CompilerVersion >= 23)}
 procedure TCachedReader.ReadData(var Value: TExtended80Rec);
 var
   P: ^TExtended80Rec;
@@ -1999,6 +2019,7 @@ begin
     Value := P^;
   end;
 end;
+{$ifend}
 
 procedure TCachedReader.ReadData(var Value: Currency);
 var
@@ -2636,6 +2657,18 @@ begin
   if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then Flush;
 end;
 
+procedure TCachedWriter.WriteData(const Value: Extended);
+var
+  P: ^Extended;
+begin
+  P := Pointer(Current);
+  P^ := Value;
+  Inc(P);
+  Pointer(Current) := P;
+  if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then Flush;
+end;
+
+{$if not Defined(FPC) and (CompilerVersion >= 23)}
 procedure TCachedWriter.WriteData(const Value: TExtended80Rec);
 var
   P: ^TExtended80Rec;
@@ -2646,6 +2679,7 @@ begin
   Pointer(Current) := P;
   if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then Flush;
 end;
+{$ifend}
 
 procedure TCachedWriter.WriteData(const Value: Currency);
 var
