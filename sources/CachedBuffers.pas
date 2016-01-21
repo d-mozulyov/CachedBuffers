@@ -560,7 +560,6 @@ end;
 const
   MEMORY_PAGE_SIZE = 4 * 1024;
   DEFAULT_CACHED_SIZE = 64 * 1024;
-  DEFAULT_CACHED_FILE_SIZE = 256 * 1024;
 
 function CachedBufferMemory(const PreviousSize, BufferSize: NativeUInt): TCachedBufferMemory;
 var
@@ -2972,7 +2971,7 @@ begin
   begin
     if (Size > 0) and (Size < FileSize) then FileSize := Size;
 
-    inherited Create(InternalCallback, GetOptimalBufferSize(0, DEFAULT_CACHED_FILE_SIZE, FileSize));
+    inherited Create(InternalCallback, GetOptimalBufferSize(0, DEFAULT_CACHED_SIZE, FileSize));
     Limit := FileSize;
   end;
 end;
@@ -3050,7 +3049,7 @@ begin
   if (FHandle = INVALID_HANDLE_VALUE) or (FOffset < 0) then
     raise ECachedBuffer.Create('Invalid file handle');
 
-  inherited Create(InternalCallback, GetOptimalBufferSize(0, DEFAULT_CACHED_FILE_SIZE, Size));
+  inherited Create(InternalCallback, GetOptimalBufferSize(0, DEFAULT_CACHED_SIZE, Size));
   if (Size > 0) then
     Limit := Size;
 end;

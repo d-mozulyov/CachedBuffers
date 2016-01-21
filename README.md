@@ -140,7 +140,7 @@ public
 end;
 ```
 ##### TCachedFileReader
-The `TCachedFileReader` is a standard class designed for files reading of their parts. A standard buffer size equals 256KB. The `Limit` property is automatically set and equals the size of the file or the `Size` parameter.
+The `TCachedFileReader` is a standard class designed for files reading of their parts. The `Limit` property is automatically set and equals the size of the file or the `Size` parameter.
 ```pascal
 TCachedFileReader = class(TCachedReader)
 public
@@ -153,7 +153,7 @@ public
 end;
 ```
 ##### TCachedFileWriter
-The `TCachedFileWriter` is a standard class designed for files writing or their parts. A standard buffer size equals 256KB. The `Limit` parameter is set if the `Size` parameter is defined.
+The `TCachedFileWriter` is a standard class designed for files writing or their parts. The `Limit` parameter is set if the `Size` parameter is defined.
 ```pascal
 TCachedFileWriter = class(TCachedWriter)
 public
