@@ -100,7 +100,7 @@ type
   {$ifdef FPC}
     PUInt64 = ^UInt64;
   {$else}
-    {$if CompilerVersion < 15}
+    {$if CompilerVersion < 16}
       UInt64 = Int64;
       PUInt64 = ^UInt64;
     {$ifend}
