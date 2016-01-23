@@ -223,7 +223,7 @@ type
     procedure ReadData(var Value: Integer); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure ReadData(var Value: Cardinal); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure ReadData(var Value: Int64); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
-    {$if Defined(FPC) or (CompilerVersion >= 15)}
+    {$if Defined(FPC) or (CompilerVersion >= 16)}
     procedure ReadData(var Value: UInt64); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifend}
     procedure ReadData(var Value: Single); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
@@ -274,7 +274,7 @@ type
     procedure WriteData(const Value: Integer); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: Cardinal); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: Int64); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
-    {$if Defined(FPC) or (CompilerVersion >= 15)}
+    {$if Defined(FPC) or (CompilerVersion >= 16)}
     procedure WriteData(const Value: UInt64); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifend}
     procedure WriteData(const Value: Single); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
@@ -1931,7 +1931,7 @@ begin
   end;
 end;
 
-{$if Defined(FPC) or (CompilerVersion >= 15)}
+{$if Defined(FPC) or (CompilerVersion >= 16)}
 procedure TCachedReader.ReadData(var Value: UInt64);
 var
   P: ^UInt64;
@@ -2621,7 +2621,7 @@ begin
   if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then Flush;
 end;
 
-{$if Defined(FPC) or (CompilerVersion >= 15)}
+{$if Defined(FPC) or (CompilerVersion >= 16)}
 procedure TCachedWriter.WriteData(const Value: UInt64);
 var
   P: ^UInt64;
