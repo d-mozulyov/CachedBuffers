@@ -81,7 +81,7 @@ begin
   F1 := TFileStream.Create(CORRECT_FILE_NAME, fmOpenRead or fmShareDenyWrite);
   try
     Size := F1.Size;
-    F2 := TFileStream.Create(CORRECT_FILE_NAME, fmOpenRead or fmShareDenyWrite);
+    F2 := TFileStream.Create(OUTPUT_FILE_NAME, fmOpenRead or fmShareDenyWrite);
     try
       if (Size <> F2.Size) then
       begin
@@ -209,6 +209,9 @@ begin
       Current := Writer.Current;
     end;
   end;
+
+  // retrieve current cached pointer
+  Writer.Current := Current;
 end;
 
 // standard way to write data to File/TextFile
