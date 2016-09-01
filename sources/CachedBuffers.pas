@@ -601,7 +601,7 @@ begin
 
   {$ifdef POSIX}
     if (fstat(Handle, S) = 0) then
-      Result := S.st_size;
+      Result := S.st_size
     else
       Result := -1;
   {$endif}
