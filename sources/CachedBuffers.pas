@@ -1,7 +1,7 @@
 unit CachedBuffers;
 
 {******************************************************************************}
-{ Copyright (c) 2013 Dmitry Mozulyov                                           }
+{ Copyright (c) 2018 Dmitry Mozulyov                                           }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -39,6 +39,9 @@ unit CachedBuffers;
   {$ifdef CPUX86_64}
     {$define CPUX64}
   {$endif}
+  {$if Defined(CPUARM) or Defined(UNIX)}
+    {$define POSIX}
+  {$ifend}
 {$else}
   {$if CompilerVersion >= 24}
     {$LEGACYIFEND ON}
@@ -69,9 +72,20 @@ unit CachedBuffers;
 {$endif}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
 {$O+}{$R-}{$I-}{$Q-}{$W-}
-{$if Defined(CPUX86) or Defined(CPUX64)}
+{$ifdef CPUX86}
+  {$ifNdef NEXTGEN}
+    {$define CPUX86ASM}
+    {$define CPUINTELASM}
+  {$endif}
   {$define CPUINTEL}
-{$ifend}
+{$endif}
+{$ifdef CPUX64}
+  {$ifNdef NEXTGEN}
+    {$define CPUX64ASM}
+    {$define CPUINTELASM}
+  {$endif}
+  {$define CPUINTEL}
+{$endif}
 {$if Defined(CPUX64) or Defined(CPUARM64)}
   {$define LARGEINT}
 {$else}
@@ -84,6 +98,11 @@ unit CachedBuffers;
   {$define OPERATORSUPPORT}
 {$ifend}
 
+// FPC Linux case
+{$ifdef POSIX}
+  {$undef CPUX64ASM}
+  {$undef CPUINTELASM}
+{$endif}
 
 interface
   uses {$ifdef UNITSCOPENAMES}System.Types{$else}Types{$endif},
@@ -137,11 +156,11 @@ type
 
   TCachedBufferMemory = record
     Handle: Pointer;
-    PreviousSize: NativeUInt;   
+    PreviousSize: NativeUInt;
       Data: Pointer;
       Size: NativeUInt;
     Additional: Pointer;
-    AdditionalSize: NativeUInt;  
+    AdditionalSize: NativeUInt;
   end;
   PCachedBufferMemory = ^TCachedBufferMemory;
 
@@ -447,8 +466,8 @@ type
   {$endif}
 
 
-// fast non-collision Move() realization        
-procedure NcMove(const Source; var Dest; const Size: NativeUInt); {$ifdef CPUARM}inline;{$endif}
+// fast non-collision Move() realization
+procedure NcMove(const Source; var Dest; const Size: NativeUInt); {$ifNdef CPUINTELASM}inline;{$endif}
 
 implementation
 
@@ -852,7 +871,7 @@ begin
 
   // flush buffer
   NewPositionBase := Self.Position;
-  if (Cur > Over) then NewPositionBase := NewPositionBase - (Cur - Over);
+  if (Cur > Over) then NewPositionBase := NewPositionBase - Int64(Cur - Over);
   NewEOF := False;
   if (Kind = cbWriter) then
   begin
@@ -867,7 +886,7 @@ begin
     end;
   end;
   FPositionBase := NewPositionBase;
-  if (NewEOF) then SetEOF(True);  
+  if (NewEOF) then SetEOF(True);
   DoProgress;
 
   // Result
@@ -992,7 +1011,7 @@ procedure NcMoveInternal(const Source; var Dest; const Size: NativeUInt); forwar
 {$endif}
 
 procedure TCachedWriter.Write(const Buffer; const Count: NativeUInt);
-{$ifNdef CPUINTEL}
+{$ifNdef CPUINTELASM}
 var
   P: PByte;
 begin
@@ -1049,7 +1068,7 @@ end;
 {$endif}
 
 procedure TCachedReader.Read(var Buffer; const Count: NativeUInt);
-{$ifNdef CPUINTEL}
+{$ifNdef CPUINTELASM}
 var
   P: PByte;
 begin
@@ -1104,7 +1123,7 @@ end;
 {$endif}
 
 
-{$ifNdef CPUINTEL}
+{$ifNdef CPUINTELASM}
 // System memcpy recall
 procedure NcMove(const Source; var Dest; const Size: NativeUInt);
 begin
@@ -1542,7 +1561,7 @@ var
 begin
   if (Count = 0) then Exit;
 
-  PositionHigh := Position + Count;
+  PositionHigh := Position + Int64(Count);
   Done := (not FEOF) and (Position >= 0) and ((not Limited) or (Limit >= PositionHigh));
   if (Done) then
   begin
@@ -1596,7 +1615,7 @@ begin
         if (Size <> Size64) then Size := Count;
       {$endif}
       if (Size > Count) then Size := Count;
-      Done := DoDirectFollowingRead(PositionHigh - Size,
+      Done := DoDirectFollowingRead(PositionHigh - Int64(Size),
                                     Pointer(NativeUInt(@Buffer) + (Count - Size)),
                                     Size);
     end;
@@ -1632,7 +1651,7 @@ begin
   FilledSize := NativeUInt(FOverflow) - NativeUInt(FMemory.Data);
 
   {$ifdef LARGEINT}
-    AllocatingSize := (Position - Self.FPositionBase) + Size;
+    AllocatingSize := NativeUInt(Position - Self.FPositionBase) + Size;
   {$else .SMALLINT}
     AllocatingSize64 := (Position - Self.FPositionBase) + Size;
     AllocatingSize := AllocatingSize64;
@@ -1667,7 +1686,7 @@ begin
   FlushSize := NativeUInt(FMemory.Additional) - NativeUInt(FOverflow);
   if (FLimited) then
   begin
-    MarginLimit := FLimit - (Self.FPositionBase + FilledSize);
+    MarginLimit := FLimit - (Self.FPositionBase + Int64(FilledSize));
     if (MarginLimit <= FlushSize) then
     begin
       FlushSize := MarginLimit;
@@ -1678,7 +1697,7 @@ begin
   if (R > FlushSize) then RaiseReading;
   if (R < FlushSize) then FFinishing := True;
   Inc(FOverflow, R);
-  if (Position + Size > Self.FPositionBase + (NativeUInt(FOverflow) - NativeUInt(Memory.Data))) then
+  if (Position + Int64(Size) > Self.FPositionBase + Int64(NativeUInt(FOverflow) - NativeUInt(Memory.Data))) then
   begin
     Result := False;
     Exit;
@@ -1703,7 +1722,7 @@ begin
     RaiseReading;
 
   // limit test
-  if (FLimited) and (Self.Position + Size > FLimit) then
+  if (FLimited) and (Self.Position + Int64(Size) > FLimit) then
     RaiseReading;
 
   // read Margin
@@ -2266,14 +2285,14 @@ var
   S: NativeUInt;
 begin
   Done := False;
-  if (not FEOF) and ((not FLimited) or (FLimit >= (Self.Position + Size))) then
+  if (not FEOF) and ((not FLimited) or (FLimit >= (Self.Position + Int64(Size)))) then
   begin
     repeat
       S := NativeUInt(FOverflow) - NativeUInt(Current);
       if (S > Size) then S := Size;
       Current := FOverflow;
       Dec(Size, S);
-      if (Size <> 0) then Flush;      
+      if (Size <> 0) then Flush;
     until (FEOF) or (Size = 0);
 
     Done := (Size = 0);
@@ -2311,7 +2330,7 @@ var
 begin
   if (Count = 0) then Exit;
 
-  PositionHigh := Position + Count;
+  PositionHigh := Position + Int64(Count);
   Done := (not FEOF) and (Position >= 0) and ((not Limited) or (Limit >= PositionHigh));
   if (Done) then
   begin
@@ -2368,7 +2387,7 @@ begin
         if (Size <> Size64) then Size := Count;
       {$endif}
       if (Size > Count) then Size := Count;
-      Done := DoDirectFollowingWrite(PositionHigh - Size,
+      Done := DoDirectFollowingWrite(PositionHigh - Int64(Size),
                                      Pointer(NativeUInt(@Buffer) + (Count - Size)),
                                      Size);
     end;
@@ -2406,7 +2425,7 @@ begin
   end;
 
   {$ifdef LARGEINT}
-    AllocatingSize := (Position - Self.FPositionBase) + Size;
+    AllocatingSize := NativeUInt(Position - Self.FPositionBase) + Size;
   {$else .SMALLINT}
     AllocatingSize64 := (Position - Self.FPositionBase) + Size;
     AllocatingSize := AllocatingSize64;
@@ -2451,7 +2470,7 @@ begin
   Data := Pointer(@Buffer);
 
   // limit test
-  if (FLimited) and (Self.Position + Size > FLimit) then
+  if (FLimited) and (Self.Position + Int64(Size) > FLimit) then
     RaiseWriting;
 
   // write margin to buffer if used

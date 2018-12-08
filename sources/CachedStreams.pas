@@ -1,7 +1,7 @@
 unit CachedStreams;
 
 {******************************************************************************}
-{ Copyright (c) 2013 Dmitry Mozulyov                                           }
+{ Copyright (c) 2018 Dmitry Mozulyov                                           }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -39,6 +39,9 @@ unit CachedStreams;
   {$ifdef CPUX86_64}
     {$define CPUX64}
   {$endif}
+  {$if Defined(CPUARM) or Defined(UNIX)}
+    {$define POSIX}
+  {$ifend}
 {$else}
   {$if CompilerVersion >= 24}
     {$LEGACYIFEND ON}
@@ -69,9 +72,20 @@ unit CachedStreams;
 {$endif}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
 {$O+}{$R-}{$I-}{$Q-}{$W-}
-{$if Defined(CPUX86) or Defined(CPUX64)}
+{$ifdef CPUX86}
+  {$ifNdef NEXTGEN}
+    {$define CPUX86ASM}
+    {$define CPUINTELASM}
+  {$endif}
   {$define CPUINTEL}
-{$ifend}
+{$endif}
+{$ifdef CPUX64}
+  {$ifNdef NEXTGEN}
+    {$define CPUX64ASM}
+    {$define CPUINTELASM}
+  {$endif}
+  {$define CPUINTEL}
+{$endif}
 {$if Defined(CPUX64) or Defined(CPUARM64)}
   {$define LARGEINT}
 {$else}
@@ -438,7 +452,7 @@ begin
     begin
       Count := Offset;
       if (Count > NativeUInt(High(NativeInt))) then Count := NativeUInt(High(NativeInt));
-      Offset := Offset - Count;
+      Offset := Offset - Int64(Count);
 
       TCachedReader(CachedBuffer).Skip(Count);
     end;
@@ -732,7 +746,7 @@ begin
       if (Result <> S_OK) then Exit;
 
       Inc(NativeInt(CachedBuffer.Current), N);
-      cb := cb - N;
+      Dec(cb, N);
     end;
 
     if (@cbWritten <> nil) then cbWritten := BytesWritten;
