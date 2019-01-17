@@ -1,7 +1,7 @@
 unit CachedStreams;
 
 {******************************************************************************}
-{ Copyright (c) 2018 Dmitry Mozulyov                                           }
+{ Copyright (c) 2019 Dmitry Mozulyov                                           }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -29,10 +29,11 @@ unit CachedStreams;
 
 // compiler directives
 {$ifdef FPC}
-  {$mode delphi}
-  {$asmmode intel}
+  {$MODE DELPHIUNICODE}
+  {$ASMMODE INTEL}
   {$define INLINESUPPORT}
   {$define INLINESUPPORTSIMPLE}
+  {$define OPERATORSUPPORT}
   {$ifdef CPU386}
     {$define CPUX86}
   {$endif}
@@ -57,6 +58,9 @@ unit CachedStreams;
   {$if CompilerVersion >= 17}
     {$define INLINESUPPORTSIMPLE}
   {$ifend}
+  {$if CompilerVersion >= 18}
+    {$define OPERATORSUPPORT}
+  {$ifend}
   {$if CompilerVersion < 23}
     {$define CPUX86}
   {$else}
@@ -66,24 +70,21 @@ unit CachedStreams;
     {$WEAKLINKRTTI ON}
     {$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
   {$ifend}
-  {$if (not Defined(NEXTGEN)) and (CompilerVersion >= 20)}
-    {$define INTERNALCODEPAGE}
-  {$ifend}
 {$endif}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
 {$O+}{$R-}{$I-}{$Q-}{$W-}
 {$ifdef CPUX86}
-  {$ifNdef NEXTGEN}
+  {$if not Defined(NEXTGEN)}
     {$define CPUX86ASM}
     {$define CPUINTELASM}
-  {$endif}
+  {$ifend}
   {$define CPUINTEL}
 {$endif}
 {$ifdef CPUX64}
-  {$ifNdef NEXTGEN}
+  {$if (not Defined(POSIX)) or Defined(FPC)}
     {$define CPUX64ASM}
     {$define CPUINTELASM}
-  {$endif}
+  {$ifend}
   {$define CPUINTEL}
 {$endif}
 {$if Defined(CPUX64) or Defined(CPUARM64)}
@@ -94,10 +95,12 @@ unit CachedStreams;
 {$ifdef KOL_MCK}
   {$define KOL}
 {$endif}
-{$if Defined(FPC) or (CompilerVersion >= 18)}
-  {$define OPERATORSUPPORT}
-{$ifend}
 
+{$ifdef POSIX}
+  {$undef CPUX86ASM}
+  {$undef CPUX64ASM}
+  {$undef CPUINTELASM}
+{$endif}
 
 interface
   uses {$ifdef UNITSCOPENAMES}System.Types{$else}Types{$endif},
@@ -123,6 +126,8 @@ type
   // standard types
   {$ifdef FPC}
     PUInt64 = ^UInt64;
+    PBoolean = ^Boolean;
+    PString = ^string;
   {$else}
     {$if CompilerVersion < 16}
       UInt64 = Int64;
@@ -136,8 +141,12 @@ type
       PNativeInt = ^NativeInt;
       PNativeUInt = ^NativeUInt;
     {$ifend}
+    PWord = ^Word;
   {$endif}
-  TBytes = array of Byte;
+  {$if SizeOf(Extended) >= 10}
+    {$define EXTENDEDSUPPORT}
+  {$ifend}
+  TBytes = {$if (not Defined(FPC)) and (CompilerVersion >= 23)}TArray<Byte>{$else}array of Byte{$ifend};
   PBytes = ^TBytes;
 
   // CachedBuffers types
@@ -156,9 +165,7 @@ type
   TCachedFileWriter = CachedBuffers.TCachedFileWriter;
   TCachedMemoryReader = CachedBuffers.TCachedMemoryReader;
   TCachedMemoryWriter = CachedBuffers.TCachedMemoryWriter;
-  {$ifdef MSWINDOWS}
   TCachedResourceReader = CachedBuffers.TCachedResourceReader;
-  {$endif}
 
   // Classes.TStream or KOL.PStream
   StreamType = {$ifdef KOL}PStream{$else}TStream{$endif};
@@ -184,6 +191,7 @@ type
     property Offset: Int64 read FOFfset;
   end;
 
+
 { TCachedStreamWriter class }
 
   TCachedStreamWriter = class(TCachedWriter)
@@ -203,6 +211,7 @@ type
     property Owner: Boolean read FOwner write FOwner;
     property Offset: Int64 read FOFfset;
   end;
+
 
 { TCachedBufferStream class }
 
@@ -247,10 +256,11 @@ type
 { TCachedBufferAdapter }
 { Implements OLE IStream on TCachedBuffer }
 
-{$ifdef MSWINDOWS}
-  {$if not Defined(FPC) and (CompilerVersion >= 29)}
-     {$define NEWISTREAM}
-  {$ifend}
+  {$ifNdef FPC}
+    {$if CompilerVersion >= 29}
+      {$define NEWISTREAM}
+    {$ifend}
+  {$endif}
 
   TCachedBufferAdapter = class(TInterfacedObject, IStream)
   protected
@@ -261,7 +271,19 @@ type
     constructor Create(const CachedBuffer: TCachedBuffer; const Owner: Boolean = False);
     destructor Destroy; override;
 
-    {$ifNdef NEWISTREAM}
+    {$if Defined(FPC)}
+      function Read(pv: Pointer; cb: DWORD; pcbRead: PDWORD): HRESULT; stdcall;
+      function Write(pv: Pointer; cb: DWORD; pcbWritten: PDWORD): HRESULT; stdcall;
+      function Seek(dlibMove: LargeUInt; dwOrigin: Longint; out libNewPosition: LargeUInt): HResult; stdcall;
+      function SetSize(libNewSize: LargeUInt): HRESULT; stdcall;
+      function CopyTo(stm: IStream; cb: LargeUInt; out cbRead: LargeUInt; out cbWritten: LargeUInt): HRESULT; stdcall;
+      function Commit(grfCommitFlags: Longint): HRESULT; stdcall;
+      function Revert: HRESULT; stdcall;
+      function LockRegion(libOffset: LargeUInt;cb: LargeUInt; dwLockType: Longint): HRESULT; stdcall;
+      function UnlockRegion(libOffset: LargeUInt; cb: LargeUInt; dwLockType: Longint): HRESULT; stdcall;
+      function Stat(out statstg: TStatStg; grfStatFlag: Longint): HRESULT; stdcall;
+      function Clone(out stm: IStream): HRESULT; stdcall;
+    {$elseif not Defined(NEWISTREAM)}
       function Read(pv: Pointer; cb: Longint; pcbRead: PLongint): HResult; virtual; stdcall;
       function Write(pv: Pointer; cb: Longint; pcbWritten: PLongint): HResult; virtual; stdcall;
       function Seek(dlibMove: Largeint; dwOrigin: Longint; out libNewPosition: Largeint): HResult; virtual; stdcall;
@@ -285,13 +307,12 @@ type
       function UnlockRegion(libOffset: LargeUInt; cb: LargeUInt; dwLockType: DWORD): HResult; virtual; stdcall;
       function Stat(out statstg: TStatStg; grfStatFlag: DWORD): HResult; virtual; stdcall;
       function Clone(out stm: IStream): HResult; virtual; stdcall;
-    {$endif}
+    {$ifend}
 
     property Kind: TCachedBufferKind read FKind;
     property Owner: Boolean read FOwner;
     property CachedBuffer: TCachedBuffer read FCachedBuffer;
   end;
-{$endif}
 
 
 {$ifdef KOL}
@@ -568,7 +589,6 @@ end;
 
 { TCachedBufferAdapter }
 
-{$ifdef MSWINDOWS}
 constructor TCachedBufferAdapter.Create(const CachedBuffer: TCachedBuffer;
   const Owner: Boolean);
 begin
@@ -585,11 +605,13 @@ begin
   if (FOwner) then FCachedBuffer.Free;
 end;
 
-{$ifNdef NEWISTREAM}
+{$if Defined(FPC)}
+function TCachedBufferAdapter.Read(pv: Pointer; cb: DWORD; pcbRead: PDWORD): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
 function TCachedBufferAdapter.Read(pv: Pointer; cb: Longint; pcbRead: PLongint): HResult;
 {$else .NEWISTREAM}
 function TCachedBufferAdapter.Read(pv: Pointer; cb: FixedUInt; pcbRead: PFixedUInt): HResult;
-{$endif}
+{$ifend}
 var
   NumRead: Longint;
 begin
@@ -622,11 +644,13 @@ begin
   end;
 end;
 
-{$ifNdef NEWISTREAM}
+{$if Defined(FPC)}
+function TCachedBufferAdapter.Write(pv: Pointer; cb: DWORD; pcbWritten: PDWORD): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
 function TCachedBufferAdapter.Write(pv: Pointer; cb: Longint; pcbWritten: PLongint): HResult;
 {$else .NEWISTREAM}
 function TCachedBufferAdapter.Write(pv: Pointer; cb: FixedUInt; pcbWritten: PFixedUInt): HResult;
-{$endif}
+{$ifend}
 var
   NumWritten: Longint;
 begin
@@ -659,13 +683,13 @@ begin
   end;
 end;
 
-{$ifNdef NEWISTREAM}
-function TCachedBufferAdapter.Seek(dlibMove: Largeint; dwOrigin: Longint;
-  out libNewPosition: Largeint): HResult;
+{$if Defined(FPC)}
+function TCachedBufferAdapter.Seek(dlibMove: LargeUInt; dwOrigin: Longint; out libNewPosition: LargeUInt): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
+function TCachedBufferAdapter.Seek(dlibMove: Largeint; dwOrigin: Longint; out libNewPosition: Largeint): HResult;
 {$else .NEWISTREAM}
-function TCachedBufferAdapter.Seek(dlibMove: Largeint; dwOrigin: DWORD;
-  out libNewPosition: LargeUInt): HResult;
-{$endif}
+function TCachedBufferAdapter.Seek(dlibMove: Largeint; dwOrigin: DWORD; out libNewPosition: LargeUInt): HResult;
+{$ifend}
 var
   NewPos: Largeint;
 begin
@@ -684,11 +708,13 @@ begin
   end;
 end;
 
-{$ifNdef NEWISTREAM}
+{$if Defined(FPC)}
+function TCachedBufferAdapter.SetSize(libNewSize: LargeUInt): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
 function TCachedBufferAdapter.SetSize(libNewSize: Largeint): HResult;
 {$else .NEWISTREAM}
 function TCachedBufferAdapter.SetSize(libNewSize: LargeUInt): HResult;
-{$endif}
+{$ifend}
 begin
   try
     CachedBuffer.Limit := libNewSize;
@@ -698,13 +724,13 @@ begin
   end;
 end;
 
-{$ifNdef NEWISTREAM}
-function TCachedBufferAdapter.CopyTo(stm: IStream; cb: Largeint; out cbRead: Largeint;
-  out cbWritten: Largeint): HResult;
+{$if Defined(FPC)}
+function TCachedBufferAdapter.CopyTo(stm: IStream; cb: LargeUInt; out cbRead: LargeUInt; out cbWritten: LargeUInt): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
+function TCachedBufferAdapter.CopyTo(stm: IStream; cb: Largeint; out cbRead: Largeint; out cbWritten: Largeint): HResult;
 {$else .NEWISTREAM}
-function TCachedBufferAdapter.CopyTo(stm: IStream; cb: LargeUInt; out cbRead: LargeUInt;
-  out cbWritten: LargeUInt): HResult;
-{$endif}
+function TCachedBufferAdapter.CopyTo(stm: IStream; cb: LargeUInt; out cbRead: LargeUInt; out cbWritten: LargeUInt): HResult;
+{$ifend}
 var
   N: NativeInt;
   BytesRead, BytesWritten: Largeint;
@@ -757,63 +783,70 @@ begin
   end;
 end;
 
-{$ifNdef NEWISTREAM}
+{$if Defined(FPC)}
+function TCachedBufferAdapter.Commit(grfCommitFlags: Longint): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
 function TCachedBufferAdapter.Commit(grfCommitFlags: Longint): HResult;
 {$else .NEWISTREAM}
 function TCachedBufferAdapter.Commit(grfCommitFlags: DWORD): HResult;
-{$endif}
+{$ifend}
 begin
   Result := S_OK;
 end;
 
-{$ifNdef NEWISTREAM}
+{$if Defined(FPC)}
+function TCachedBufferAdapter.Revert: HRESULT;
+{$elseif not Defined(NEWISTREAM)}
 function TCachedBufferAdapter.Revert: HResult;
 {$else .NEWISTREAM}
 function TCachedBufferAdapter.Revert: HResult;
-{$endif}
+{$ifend}
 begin
   Result := STG_E_REVERTED;
 end;
 
-{$ifNdef NEWISTREAM}
-function TCachedBufferAdapter.LockRegion(libOffset: Largeint; cb: Largeint;
-  dwLockType: Longint): HResult;
+{$if Defined(FPC)}
+function TCachedBufferAdapter.LockRegion(libOffset: LargeUInt;cb: LargeUInt; dwLockType: Longint): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
+function TCachedBufferAdapter.LockRegion(libOffset: Largeint; cb: Largeint; dwLockType: Longint): HResult;
 {$else .NEWISTREAM}
-function TCachedBufferAdapter.LockRegion(libOffset: LargeUInt; cb: LargeUInt;
-  dwLockType: DWORD): HResult;
-{$endif}
+function TCachedBufferAdapter.LockRegion(libOffset: LargeUInt; cb: LargeUInt; dwLockType: DWORD): HResult;
+{$ifend}
 begin
   Result := STG_E_INVALIDFUNCTION;
 end;
 
-{$ifNdef NEWISTREAM}
-function TCachedBufferAdapter.UnlockRegion(libOffset: Largeint; cb: Largeint;
-  dwLockType: Longint): HResult;
+{$if Defined(FPC)}
+function TCachedBufferAdapter.UnlockRegion(libOffset: LargeUInt; cb: LargeUInt; dwLockType: Longint): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
+function TCachedBufferAdapter.UnlockRegion(libOffset: Largeint; cb: Largeint; dwLockType: Longint): HResult;
 {$else .NEWISTREAM}
-function TCachedBufferAdapter.UnlockRegion(libOffset: LargeUInt; cb: LargeUInt;
-  dwLockType: DWORD): HResult;
-{$endif}
+function TCachedBufferAdapter.UnlockRegion(libOffset: LargeUInt; cb: LargeUInt; dwLockType: DWORD): HResult;
+{$ifend}
 begin
   Result := STG_E_INVALIDFUNCTION;
 end;
 
-{$ifNdef NEWISTREAM}
+{$if Defined(FPC)}
+function TCachedBufferAdapter.Stat(out statstg: TStatStg; grfStatFlag: Longint): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
 function TCachedBufferAdapter.Stat(out statstg: TStatStg; grfStatFlag: Longint): HResult;
 {$else .NEWISTREAM}
 function TCachedBufferAdapter.Stat(out statstg: TStatStg; grfStatFlag: DWORD): HResult;
-{$endif}
+{$ifend}
 begin
   Result := E_NOTIMPL;
 end;
 
-{$ifNdef NEWISTREAM}
+{$if Defined(FPC)}
+function TCachedBufferAdapter.Clone(out stm: IStream): HRESULT;
+{$elseif not Defined(NEWISTREAM)}
 function TCachedBufferAdapter.Clone(out stm: IStream): HResult;
 {$else .NEWISTREAM}
 function TCachedBufferAdapter.Clone(out stm: IStream): HResult;
-{$endif}
+{$ifend}
 begin
   Result := E_NOTIMPL;
 end;
-{$endif}
 
 end.

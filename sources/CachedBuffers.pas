@@ -1,7 +1,7 @@
 unit CachedBuffers;
 
 {******************************************************************************}
-{ Copyright (c) 2018 Dmitry Mozulyov                                           }
+{ Copyright (c) 2019 Dmitry Mozulyov                                           }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -29,10 +29,18 @@ unit CachedBuffers;
 
 // compiler directives
 {$ifdef FPC}
-  {$mode delphi}
-  {$asmmode intel}
+  {$MODE DELPHIUNICODE}
+  {$ASMMODE INTEL}
   {$define INLINESUPPORT}
   {$define INLINESUPPORTSIMPLE}
+  {$define OPERATORSUPPORT}
+  {$define ANSISTRSUPPORT}
+  {$define SHORTSTRSUPPORT}
+  {$define WIDESTRSUPPORT}
+  {$ifdef MSWINDOWS}
+    {$define WIDESTRLENSHIFT}
+  {$endif}
+  {$define INTERNALCODEPAGE}
   {$ifdef CPU386}
     {$define CPUX86}
   {$endif}
@@ -57,6 +65,9 @@ unit CachedBuffers;
   {$if CompilerVersion >= 17}
     {$define INLINESUPPORTSIMPLE}
   {$ifend}
+  {$if CompilerVersion >= 18}
+    {$define OPERATORSUPPORT}
+  {$ifend}
   {$if CompilerVersion < 23}
     {$define CPUX86}
   {$else}
@@ -66,24 +77,36 @@ unit CachedBuffers;
     {$WEAKLINKRTTI ON}
     {$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
   {$ifend}
-  {$if (not Defined(NEXTGEN)) and (CompilerVersion >= 20)}
+  {$if (not Defined(NEXTGEN)) or (CompilerVersion >= 31)}
+    {$define ANSISTRSUPPORT}
+  {$ifend}
+  {$ifNdef NEXTGEN}
+    {$define SHORTSTRSUPPORT}
+  {$endif}
+  {$if Defined(MSWINDOWS) or Defined(MACOS)}
+    {$define WIDESTRSUPPORT}
+  {$ifend}
+  {$if Defined(MSWINDOWS) or (Defined(WIDESTRSUPPORT) and (CompilerVersion <= 21))}
+    {$define WIDESTRLENSHIFT}
+  {$ifend}
+  {$if Defined(ANSISTRSUPPORT) and (CompilerVersion >= 20)}
     {$define INTERNALCODEPAGE}
   {$ifend}
 {$endif}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
 {$O+}{$R-}{$I-}{$Q-}{$W-}
 {$ifdef CPUX86}
-  {$ifNdef NEXTGEN}
+  {$if not Defined(NEXTGEN)}
     {$define CPUX86ASM}
     {$define CPUINTELASM}
-  {$endif}
+  {$ifend}
   {$define CPUINTEL}
 {$endif}
 {$ifdef CPUX64}
-  {$ifNdef NEXTGEN}
+  {$if (not Defined(POSIX)) or Defined(FPC)}
     {$define CPUX64ASM}
     {$define CPUINTELASM}
-  {$endif}
+  {$ifend}
   {$define CPUINTEL}
 {$endif}
 {$if Defined(CPUX64) or Defined(CPUARM64)}
@@ -94,12 +117,9 @@ unit CachedBuffers;
 {$ifdef KOL_MCK}
   {$define KOL}
 {$endif}
-{$if Defined(FPC) or (CompilerVersion >= 18)}
-  {$define OPERATORSUPPORT}
-{$ifend}
 
-// FPC Linux case
 {$ifdef POSIX}
+  {$undef CPUX86ASM}
   {$undef CPUX64ASM}
   {$undef CPUINTELASM}
 {$endif}
@@ -107,7 +127,13 @@ unit CachedBuffers;
 interface
   uses {$ifdef UNITSCOPENAMES}System.Types{$else}Types{$endif},
        {$ifdef MSWINDOWS}{$ifdef UNITSCOPENAMES}Winapi.Windows{$else}Windows{$endif},{$endif}
-       {$ifdef POSIX}Posix.String_, Posix.SysStat, Posix.Unistd,{$endif}
+       {$ifdef POSIX}
+         {$ifdef FPC}
+           BaseUnix,
+         {$else}
+           Posix.String_, Posix.SysStat, Posix.Unistd,
+         {$endif}
+       {$endif}
        {$ifdef KOL}
          KOL, err
        {$else}
@@ -118,6 +144,8 @@ type
   // standard types
   {$ifdef FPC}
     PUInt64 = ^UInt64;
+    PBoolean = ^Boolean;
+    PString = ^string;
   {$else}
     {$if CompilerVersion < 16}
       UInt64 = Int64;
@@ -131,9 +159,20 @@ type
       PNativeInt = ^NativeInt;
       PNativeUInt = ^NativeUInt;
     {$ifend}
+    PWord = ^Word;
   {$endif}
-  TBytes = array of Byte;
+  {$if SizeOf(Extended) >= 10}
+    {$define EXTENDEDSUPPORT}
+  {$ifend}
+  TBytes = {$if (not Defined(FPC)) and (CompilerVersion >= 23)}TArray<Byte>{$else}array of Byte{$ifend};
   PBytes = ^TBytes;
+  {$if Defined(NEXTGEN) and (CompilerVersion >= 31)}
+    AnsiChar = type System.UTF8Char;
+    PAnsiChar = ^AnsiChar;
+    AnsiString = type System.RawByteString;
+    PAnsiString = ^AnsiString;
+    {$POINTERMATH ON}
+  {$ifend}
 
   // exception class
   ECachedBuffer = class(Exception)
@@ -188,7 +227,9 @@ type
     function DoWriterFlush: Boolean;
     function DoReaderFlush: Boolean;
     function DoProgress: Boolean;
-  protected
+  {$ifdef FPC}
+  public
+  {$endif}
     constructor Create(const Kind: TCachedBufferKind; const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
   {$ifNdef AUTOREFCOUNT}
   public
@@ -231,7 +272,7 @@ type
     // TStream-like data reading
     procedure Read(var Buffer; const Count: NativeUInt);
     procedure ReadData(var Value: Boolean); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
-    {$ifNdef NEXTGEN}
+    {$ifdef ANSISTRSUPPORT}
     procedure ReadData(var Value: AnsiChar); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$endif}
     procedure ReadData(var Value: WideChar); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
@@ -247,16 +288,22 @@ type
     {$ifend}
     procedure ReadData(var Value: Single); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure ReadData(var Value: Double); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$if (not Defined(FPC)) or Defined(EXTENDEDSUPPORT)}
     procedure ReadData(var Value: Extended); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$ifend}
     {$if not Defined(FPC) and (CompilerVersion >= 23)}
     procedure ReadData(var Value: TExtended80Rec); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifend}
     procedure ReadData(var Value: Currency); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure ReadData(var Value: TPoint); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure ReadData(var Value: TRect); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
-    {$ifNdef NEXTGEN}
+    {$ifdef SHORTSTRSUPPORT}
     procedure ReadData(var Value: ShortString); overload;
+    {$endif}
+    {$ifdef ANSISTRSUPPORT}
     procedure ReadData(var Value: AnsiString{$ifdef INTERNALCODEPAGE}; CodePage: Word = 0{$endif}); overload;
+    {$endif}
+    {$ifdef MSWINDOWS}
     procedure ReadData(var Value: WideString); overload;
     {$endif}
     {$ifdef UNICODE}
@@ -282,7 +329,7 @@ type
     // TStream-like data writing
     procedure Write(const Buffer; const Count: NativeUInt);
     procedure WriteData(const Value: Boolean); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
-    {$ifNdef NEXTGEN}
+    {$ifdef ANSISTRSUPPORT}
     procedure WriteData(const Value: AnsiChar); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$endif}
     procedure WriteData(const Value: WideChar); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
@@ -298,16 +345,22 @@ type
     {$ifend}
     procedure WriteData(const Value: Single); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: Double); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$if (not Defined(FPC)) or Defined(EXTENDEDSUPPORT)}
     procedure WriteData(const Value: Extended); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$ifend}
     {$if not Defined(FPC) and (CompilerVersion >= 23)}
     procedure WriteData(const Value: TExtended80Rec); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     {$ifend}
     procedure WriteData(const Value: Currency); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: TPoint); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
     procedure WriteData(const Value: TRect); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
-    {$ifNdef NEXTGEN}
+    {$ifdef SHORTSTRSUPPORT}
     procedure WriteData(const Value: ShortString); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$endif}
+    {$ifdef ANSISTRSUPPORT}
     procedure WriteData(const Value: AnsiString); overload; {$ifdef INLINESUPPORTSIMPLE}inline;{$endif}
+    {$endif}
+    {$ifdef MSWINDOWS}
     procedure WriteData(const Value: WideString); overload;
     {$endif}
     {$ifdef UNICODE}
@@ -450,7 +503,6 @@ type
 
 { TCachedResourceReader class }
 
-  {$ifdef MSWINDOWS}
   TCachedResourceReader = class(TCachedMemoryReader)
   protected
     HGlobal: THandle;
@@ -463,13 +515,23 @@ type
     constructor Create(Instance: THandle; const ResName: string; ResType: PChar);
     constructor CreateFromID(Instance: THandle; ResID: Word; ResType: PChar);
   end;
-  {$endif}
 
 
 // fast non-collision Move() realization
 procedure NcMove(const Source; var Dest; const Size: NativeUInt); {$ifNdef CPUINTELASM}inline;{$endif}
 
 implementation
+
+{$ifNdef ANSISTRSUPPORT}
+type
+  AnsiChar = type Byte;
+  PAnsiChar = ^AnsiChar;
+{$endif}
+
+{$ifdef FPC}
+const
+  INVALID_HANDLE_VALUE = THandle(-1);
+{$endif}
 
 
 procedure RaisePointers;
@@ -609,17 +671,17 @@ var
     P: TPoint;
   {$endif}
   {$ifdef POSIX}
-    S: _stat;
+    S: {$ifdef FPC}Stat{$else}_stat{$endif};
   {$endif}
 begin
   {$ifdef MSWINDOWS}
-    P.X := {$ifdef UNITSCOPENAMES}Winapi.{$endif}Windows.GetFileSize(Handle, @P.Y);
+    P.X := {$ifdef UNITSCOPENAMES}Winapi.{$endif}Windows.GetFileSize(Handle, Pointer(@P.Y));
     if (P.Y = -1) then P.X := -1;
     Result := PInt64(@P)^;
   {$endif}
 
   {$ifdef POSIX}
-    if (fstat(Handle, S) = 0) then
+    if ({$ifdef FPC}FpFStat{$else}fstat{$endif}(Handle, S) = 0) then
       Result := S.st_size
     else
       Result := -1;
@@ -1028,7 +1090,7 @@ begin
     NcMove(Buffer, P^, Count);
   end;
 end;
-{$else .CPUX86 or .CPUX64}
+{$else .CPUX86 or .CPUX64} {$ifdef FPC}assembler; nostackframe;{$endif}
 asm
   {$ifdef CPUX86}
     xchg eax, ebx
@@ -1085,7 +1147,7 @@ begin
     NcMove(P^, Buffer, Count);
   end;
 end;
-{$else .CPUX86 or .CPUX64}
+{$else .CPUX86 or .CPUX64} {$ifdef FPC}assembler; nostackframe;{$endif}
 asm
   {$ifdef CPUX86}
     xchg eax, ebx
@@ -1127,18 +1189,22 @@ end;
 // System memcpy recall
 procedure NcMove(const Source; var Dest; const Size: NativeUInt);
 begin
-  memcpy(Dest, Source, Size);
+  {$ifdef FPC}
+    Move(Source, Dest, Size);
+  {$else}
+    memcpy(Dest, Source, Size);
+  {$endif}
 end;
 {$else .CPUX86 or .CPUX64}
 // SSE-based non-collision Move() realization
-procedure NcMove(const Source; var Dest; const Size: NativeUInt);
+procedure NcMove(const Source; var Dest; const Size: NativeUInt); {$ifdef FPC}assembler; nostackframe;{$endif}
 {$ifdef CPUX86}
 asm
   push ebx
   movzx ebx, byte ptr [SSE_SUPPORT]
   jmp NcMoveInternal
 end;
-procedure NcMoveInternal(const Source; var Dest; const Size: NativeUInt);
+procedure NcMoveInternal(const Source; var Dest; const Size: NativeUInt); {$ifdef FPC}assembler; nostackframe;{$endif}
 {$endif}
 asm
   // basic routine
@@ -1153,7 +1219,7 @@ asm
     mov rax, rcx
     xchg rcx, r8
     // r9 as pointer to @move_03_items
-    lea r9, [@move_03_items]
+    mov r9, offset @move_03_items
   {$endif}
 
   // is big/large (32...inf)
@@ -1212,7 +1278,7 @@ asm
     and r8, 3
     lea r9, [r9 + r8*8]
     // case jump
-    lea r8, [@move_dwords]
+    mov r8, offset @move_dwords
     jmp qword ptr [r8 + rcx*8]
     @move_dwords: DQ @rw_0,@rw_4,@rw_8,@rw_12
     @rw_8:
@@ -1390,11 +1456,11 @@ asm
     movaps [rsp-8-16], xmm6
     movaps [rsp-8-32], xmm7
     mov r8, rcx
-    lea r9, [@aligned_reads]
+    mov r9, offset @aligned_reads
     shr rcx, 4
     test rax, 15
     jz @move_16128
-    lea r9, [@unaligned_reads]
+    mov r9, offset @unaligned_reads
   {$endif}
 
 @move_16128:
@@ -1482,7 +1548,7 @@ asm
     movups xmm0, [rax - 0*16 - 16]
     jae @aligned_writes
   @write_16112:
-    lea r9, [@aligned_writes + 8*4]
+    mov r9, offset @aligned_writes + 8*4
     lea r9, [r9 + rcx*2]
     jmp r9
   {$endif}
@@ -1795,7 +1861,7 @@ begin
   end;
 end;
 
-{$ifNdef NEXTGEN}
+{$ifdef ANSISTRSUPPORT}
 procedure TCachedReader.ReadData(var Value: AnsiChar);
 var
   P: ^AnsiChar;
@@ -2003,6 +2069,7 @@ begin
   end;
 end;
 
+{$if (not Defined(FPC)) or Defined(EXTENDEDSUPPORT)}
 procedure TCachedReader.ReadData(var Value: Extended);
 var
   P: ^Extended;
@@ -2019,6 +2086,7 @@ begin
     Value := P^;
   end;
 end;
+{$ifend}
 
 {$if not Defined(FPC) and (CompilerVersion >= 23)}
 procedure TCachedReader.ReadData(var Value: TExtended80Rec);
@@ -2090,7 +2158,7 @@ begin
   end;
 end;
 
-{$ifNdef NEXTGEN}
+{$ifdef SHORTSTRSUPPORT}
 procedure TCachedReader.ReadData(var Value: ShortString{; MaxLength: Byte});
 var
   P: PByte;
@@ -2124,28 +2192,31 @@ begin
     Read(Value[1], L);
   end;
 end;
-
-
-{$ifdef INTERNALCODEPAGE}
-procedure LStrSetLength(var Str: AnsiString; NewLength: Integer; CodePage: Word);
-asm
-  jmp System.@LStrSetLength
-end;
 {$endif}
 
+{$ifdef ANSISTRSUPPORT}
 procedure TCachedReader.ReadData(var Value: AnsiString{$ifdef INTERNALCODEPAGE}; CodePage: Word{$endif});
+{$ifdef INTERNALCODEPAGE}
+const
+  ASTR_OFFSET_CODEPAGE = {$ifdef FPC}SizeOf(NativeInt) * 3{$else .DELPHI}12{$endif};
+{$endif}
 var
   L: Integer;
 begin
   ReadData(L);
-  {$ifdef INTERNALCODEPAGE}
-  LStrSetLength(Value, L, CodePage);
-  {$else}
   SetLength(Value, L);
-  {$endif}
-  if (L <> 0) then Read(Pointer(Value)^, L);
-end;
 
+  if (L <> 0) then
+  begin
+    {$ifdef INTERNALCODEPAGE}
+    PWord(PAnsiChar(Pointer(Value)) - ASTR_OFFSET_CODEPAGE)^ := CodePage;
+    {$endif}
+    Read(Pointer(Value)^, L);
+  end;
+end;
+{$endif}
+
+{$ifdef MSWINDOWS}
 procedure TCachedReader.ReadData(var Value: WideString);
 var
   L: Integer;
@@ -2186,23 +2257,24 @@ begin
   if (VarData.VType and varDeepData <> 0) then
   begin
     case VarData.VType of
-      {$ifNdef NEXTGEN}
+      {$ifdef ANSISTRSUPPORT}
       varString:
       begin
         AnsiString(VarData.VString) := '';
         Exit;
       end;
+      {$endif}
+      {$ifdef WIDESTRSUPPORT}
       varOleStr:
       begin
         WideString(VarData.VPointer{VOleStr}) := '';
         Exit;
       end;
       {$endif}
-
       {$ifdef UNICODE}
       varUString:
       begin
-        UnicodeString(VarData.VUString) := '';
+        UnicodeString(VarData.VString) := '';
         Exit;
       end;
       {$endif}
@@ -2239,19 +2311,20 @@ begin
     varInt64,
     $15{varUInt64}: ReadData(VarData.VInt64);
 
-    {$ifNdef NEXTGEN}
+    {$ifdef ANSISTRSUPPORT}
     varString:
     begin
       ReadData(AnsiString(VarData.VPointer));
       Exit;
     end;
+    {$endif}
+    {$ifdef WIDESTRSUPPORT}
     varOleStr:
     begin
       ReadData(WideString(VarData.VPointer));
       Exit;
     end;
     {$endif}
-
     {$ifdef UNICODE}
     varUString:
     begin
@@ -2539,7 +2612,7 @@ begin
   if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then Flush;
 end;
 
-{$ifNdef NEXTGEN}
+{$ifdef ANSISTRSUPPORT}
 procedure TCachedWriter.WriteData(const Value: AnsiChar);
 var
   P: ^AnsiChar;
@@ -2675,6 +2748,7 @@ begin
   if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then Flush;
 end;
 
+{$if (not Defined(FPC)) or Defined(EXTENDEDSUPPORT)}
 procedure TCachedWriter.WriteData(const Value: Extended);
 var
   P: ^Extended;
@@ -2685,6 +2759,7 @@ begin
   Pointer(Current) := P;
   if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then Flush;
 end;
+{$ifend}
 
 {$if not Defined(FPC) and (CompilerVersion >= 23)}
 procedure TCachedWriter.WriteData(const Value: TExtended80Rec);
@@ -2732,12 +2807,14 @@ begin
   if (NativeUInt(P) >= NativeUInt(Self.FOverflow)) then Flush;
 end;
 
-{$ifNdef NEXTGEN}
+{$ifdef SHORTSTRSUPPORT}
 procedure TCachedWriter.WriteData(const Value: ShortString);
 begin
-  Write(Value, Length(Value)+1);
+  Write(Value, Length(Value) + 1);
 end;
+{$endif}
 
+{$ifdef ANSISTRSUPPORT}
 procedure TCachedWriter.WriteData(const Value: AnsiString);
 var
   P: PInteger;
@@ -2748,11 +2825,19 @@ begin
     WriteData(Integer(0));
   end else
   begin
-    Dec(P);
-    Write(P^, P^ + SizeOf(Integer));
+    {$if Defined(FPC) and Defined(LARGEINT)}
+      Dec(NativeInt(P), SizeOf(NativeInt));
+      WriteData(P^);
+      Write(Pointer(PAnsiChar(P) + SizeOf(NativeInt))^, P^);
+    {$else}
+      Dec(P);
+      Write(P^, P^ + SizeOf(Integer));
+    {$ifend}
   end;
 end;
+{$endif}
 
+{$ifdef MSWINDOWS}
 procedure TCachedWriter.WriteData(const Value: WideString);
 var
   P: PInteger;
@@ -2764,12 +2849,8 @@ begin
   end else
   begin
     Dec(P);
-    {$if Defined(MSWINDOWS) or Defined(FPC) or (CompilerVersion < 22)}
-      WriteData(P^ shr 1);
-      Write(Pointer(NativeUInt(P) + SizeOf(Integer))^, P^);
-    {$else}
-      Write(P^, P^*2 + SizeOf(Integer));
-    {$ifend}
+    WriteData(P^ shr 1);
+    Write(Pointer(PAnsiChar(P) + SizeOf(Integer))^, P^);
   end;
 end;
 {$endif}
@@ -2785,8 +2866,14 @@ begin
     WriteData(Integer(0));
   end else
   begin
-    Dec(P);
-    Write(P^, P^*2 + SizeOf(Integer));
+    {$if Defined(FPC) and Defined(LARGEINT)}
+      Dec(NativeInt(P), SizeOf(NativeInt));
+      WriteData(P^);
+      Write(Pointer(PAnsiChar(P) + SizeOf(NativeInt))^, P^ shl 1);
+    {$else}
+      Dec(P);
+      Write(P^, P^ shl 1 + SizeOf(Integer));
+    {$ifend}
   end;
 end;
 {$endif}
@@ -2794,7 +2881,7 @@ end;
 procedure TCachedWriter.WriteData(const Value: TBytes);
 var
   P: PNativeInt;
-  {$if Defined(FPC) or (SizeOf(NativeInt) = 8)}
+  {$if Defined(FPC) and Defined(LARGEINT)}
   L: Integer;
   {$ifend}
 begin
@@ -2805,8 +2892,8 @@ begin
   end else
   begin
     Dec(P);
-    {$if Defined(FPC) or (SizeOf(NativeInt) = 8)}
-      L := P^{$ifdef FPC}+1{$endif};
+    {$if Defined(FPC) and Defined(LARGEINT)}
+      L := P^ {$ifdef FPC}+ 1{$endif};
       Inc(P);
       WriteData(L);
       Write(P^, L);
@@ -2849,19 +2936,20 @@ begin
     varInt64,
     $15{varUInt64}: WriteData(PInt64(VPtr)^);
 
-    {$ifNdef NEXTGEN}
+    {$ifdef ANSISTRSUPPORT}
     varString:
     begin
       WriteData(PAnsiString(VPtr)^);
       Exit;
     end;
+    {$endif}
+    {$ifdef WIDESTRSUPPORT}
     varOleStr:
     begin
       WriteData(PWideString(VPtr)^);
       Exit;
     end;
     {$endif}
-
     {$ifdef UNICODE}
     varUString:
     begin
@@ -2948,7 +3036,8 @@ begin
   FHandleOwner := True;
   FOffset := Offset;
   {$ifdef MSWINDOWS}
-  FHandle := {$ifdef UNITSCOPENAMES}Winapi.{$endif}Windows.CreateFile(PChar(FileName), $0001{FILE_READ_DATA}, FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
+  FHandle := {$ifdef UNITSCOPENAMES}Winapi.{$endif}Windows.{$ifdef UNICODE}CreateFileW{$else}CreateFile{$endif}
+    (PChar(FileName), $0001{FILE_READ_DATA}, FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
   {$else}
   FHandle := FileOpen(FileName, fmOpenRead or fmShareDenyNone);
   {$endif}
@@ -3049,7 +3138,8 @@ var
 begin
   FFileName := FileName;
   {$ifdef MSWINDOWS}
-  Handle := {$ifdef UNITSCOPENAMES}Winapi.{$endif}Windows.CreateFile(PChar(FileName), $0002{FILE_WRITE_DATA}, FILE_SHARE_READ, nil, CREATE_ALWAYS, 0, 0);
+  Handle := {$ifdef UNITSCOPENAMES}Winapi.{$endif}Windows.{$ifdef UNICODE}CreateFileW{$else}CreateFile{$endif}
+    (PChar(FileName), $0002{FILE_WRITE_DATA}, FILE_SHARE_READ, nil, CREATE_ALWAYS, 0, 0);
   {$else}
   Handle := FileCreate(FileName);
   {$endif}
@@ -3222,7 +3312,39 @@ end;
 
 { TCachedResourceReader }
 
+{$ifdef FPC}
+function FindResource(ModuleHandle: TFPResourceHMODULE; ResourceName, ResourceType: PChar): TFPResourceHandle;
 {$ifdef MSWINDOWS}
+begin
+  Result := Windows.FindResourceW(ModuleHandle, ResourceName, ResourceType);
+end;
+{$else}
+var
+  LBufferString: string;
+  LBufferName, LBufferType: UTF8String;
+  LResourceName, LResourceType: PAnsiChar;
+begin
+  LResourceName := Pointer(ResourceName);
+  if (NativeUInt(ResourceName) <= High(Word)) then
+  begin
+    LBufferString := ResourceName;
+    LBufferName := UTF8String(LBufferString);
+    LResourceName := PAnsiChar(LBufferName);
+  end;
+
+  LResourceType := Pointer(ResourceType);
+  if (NativeUInt(ResourceType) <= High(Word)) then
+  begin
+    LBufferString := ResourceType;
+    LBufferType := UTF8String(LBufferString);
+    LResourceType := PAnsiChar(LBufferType);
+  end;
+
+  Result := System.FindResource(ModuleHandle, LResourceName, LResourceType);
+end;
+{$endif}
+{$endif}
+
 procedure TCachedResourceReader.InternalCreate(Instance: THandle; Name,
   ResType: PChar);
 
@@ -3245,7 +3367,7 @@ procedure TCachedResourceReader.InternalCreate(Instance: THandle; Name,
 var
   HResInfo: THandle;
 begin
-  HResInfo := {$ifdef UNITSCOPENAMES}Winapi.{$endif}Windows.FindResource(Instance, Name, ResType);
+  HResInfo := FindResource(Instance, Name, ResType);
   if (HResInfo = 0) then RaiseNotFound;
   HGlobal := LoadResource(Instance, HResInfo);
   if (HGlobal = 0) then RaiseNotFound;
@@ -3267,13 +3389,13 @@ end;
 destructor TCachedResourceReader.Destroy;
 begin
   inherited;
+  UnlockResource(HGlobal);
   FreeResource(HGlobal);
 end;
-{$endif}
 
 
 {$ifdef CPUX86}
-procedure CheckSSESupport;
+procedure CheckSSESupport; {$ifdef FPC}assembler; nostackframe;{$endif}
 asm
   push ebx
   mov eax, 1
