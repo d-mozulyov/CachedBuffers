@@ -178,13 +178,10 @@ type
     FStream: StreamType;
     FOwner: Boolean;
     FOffset: Int64;
-    function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
-  {$ifNdef AUTOREFCOUNT}
+    function InternalCallback(const ASender: TCachedBuffer; AData: PByte; ASize: NativeUInt): NativeUInt;
   public
-  {$endif}
+    constructor Create(const AStream: StreamType; const AOwner: Boolean = False; const ABufferSize: NativeUInt = 0);
     destructor Destroy; override;
-  public
-    constructor Create(const Stream: StreamType; const Owner: Boolean = False; const BufferSize: NativeUInt = 0);
 
     property Stream: StreamType read FStream;
     property Owner: Boolean read FOwner write FOwner;
@@ -199,13 +196,10 @@ type
     FStream: StreamType;
     FOwner: Boolean;
     FOffset: Int64;
-    function InternalCallback(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt;
-  {$ifNdef AUTOREFCOUNT}
+    function InternalCallback(const ASender: TCachedBuffer; AData: PByte; ASize: NativeUInt): NativeUInt;
   public
-  {$endif}
+    constructor Create(const AStream: StreamType; const AOwner: Boolean = False; const ABufferSize: NativeUInt = 0);
     destructor Destroy; override;
-  public
-    constructor Create(const Stream: StreamType; const Owner: Boolean = False; const BufferSize: NativeUInt = 0);
 
     property Stream: StreamType read FStream;
     property Owner: Boolean read FOwner write FOwner;
@@ -233,19 +227,15 @@ type
     procedure SetSize(NewSize: Longint); override;
     procedure SetSize(const NewSize: Int64); override;
   {$endif}
-  {$if Defined(KOL) or (not Defined(AUTOREFCOUNT))}
-  public
-  {$ifend}
-    destructor Destroy; {$ifdef KOL}virtual{$else}override{$endif};
   public
     {$ifNdef KOL}
-    constructor Create(const CachedBuffer: TCachedBuffer; const Owner: Boolean = False);
-
+    constructor Create(const ACachedBuffer: TCachedBuffer; const AOwner: Boolean = False);
     function Read(var Buffer; Count: Longint): Longint; override;
     function Write(const Buffer; Count: Longint): Longint; override;
     function Seek(Offset: Longint; Origin: Word): Longint; overload; override;
     function Seek(const Offset: Int64; Origin: TSeekOrigin): Int64; overload; override;
     {$endif}
+    destructor Destroy; {$ifdef KOL}virtual{$else}override{$endif};
 
     property Kind: TCachedBufferKind read FKind;
     property Owner: Boolean read FOwner;
@@ -256,19 +246,17 @@ type
 { TCachedBufferAdapter }
 { Implements OLE IStream on TCachedBuffer }
 
-  {$ifNdef FPC}
-    {$if CompilerVersion >= 29}
-      {$define NEWISTREAM}
-    {$ifend}
-  {$endif}
+  {$if (not Defined(FPC)) and (CompilerVersion >= 29)}
+    {$define NEWISTREAM}
+  {$ifend}
 
-  TCachedBufferAdapter = class(TInterfacedObject, IStream)
+  TCachedBufferAdapter = class(TCachedObject, IStream)
   protected
     FKind: TCachedBufferKind;
     FOwner: Boolean;
     FCachedBuffer: TCachedBuffer;
   public
-    constructor Create(const CachedBuffer: TCachedBuffer; const Owner: Boolean = False);
+    constructor Create(const ACachedBuffer: TCachedBuffer; const AOwner: Boolean = False);
     destructor Destroy; override;
 
     {$if Defined(FPC)}
@@ -316,8 +304,8 @@ type
 
 
 {$ifdef KOL}
-function NewCachedBufferStream(const CachedBuffer: TCachedBuffer;
-  const Owner: Boolean = False): PCachedBufferStream;
+function NewCachedBufferStream(const ACachedBuffer: TCachedBuffer;
+  const AOwner: Boolean = False): PCachedBufferStream;
 {$endif}
 
 implementation
@@ -325,13 +313,13 @@ implementation
 
 { TCachedStreamReader }
 
-constructor TCachedStreamReader.Create(const Stream: StreamType;
-  const Owner: Boolean; const BufferSize: NativeUInt);
+constructor TCachedStreamReader.Create(const AStream: StreamType;
+  const AOwner: Boolean; const ABufferSize: NativeUInt);
 begin
-  FStream := Stream;
-  FOwner := Owner;
-  FOffset := Stream.Position;
-  inherited Create(InternalCallback, BufferSize);
+  FStream := AStream;
+  FOwner := AOwner;
+  FOffset := AStream.Position;
+  inherited Create(InternalCallback, ABufferSize);
 end;
 
 destructor TCachedStreamReader.Destroy;
@@ -340,26 +328,26 @@ begin
   if (FOwner) then FStream.Free;
 end;
 
-function TCachedStreamReader.InternalCallback(Sender: TCachedBuffer;
-  Data: PByte; Size: NativeUInt): NativeUInt;
+function TCachedStreamReader.InternalCallback(const ASender: TCachedBuffer;
+  AData: PByte; ASize: NativeUInt): NativeUInt;
 var
   S, R: Longint;
   N: NativeUInt;
 begin
   Result := 0;
 
-  while (Size <> 0) do
+  while (ASize <> 0) do
   begin
-    S := Size;
-    if (Size > NativeUInt(High(Longint))) then S := High(Longint);
+    S := ASize;
+    if (ASize > NativeUInt(High(Longint))) then S := High(Longint);
 
-    R := Stream.Read(Data^, S);
+    R := Stream.Read(AData^, S);
     if (R > 0) then
     begin
       N := NativeUInt(R);
       Inc(Result, N);
-      Inc(Data, N);
-      Dec(Size, N);
+      Inc(AData, N);
+      Dec(ASize, N);
     end;
 
     if (R <> S) then Break;
@@ -369,13 +357,13 @@ end;
 
 { TCachedStreamWriter }
 
-constructor TCachedStreamWriter.Create(const Stream: StreamType;
-  const Owner: Boolean; const BufferSize: NativeUInt);
+constructor TCachedStreamWriter.Create(const AStream: StreamType;
+  const AOwner: Boolean; const ABufferSize: NativeUInt);
 begin
-  FStream := Stream;
-  FOwner := Owner;
-  FOffset := Stream.Position;
-  inherited Create(InternalCallback, BufferSize);
+  FStream := AStream;
+  FOwner := AOwner;
+  FOffset := AStream.Position;
+  inherited Create(InternalCallback, ABufferSize);
 end;
 
 destructor TCachedStreamWriter.Destroy;
@@ -384,26 +372,26 @@ begin
   if (FOwner) then FStream.Free;
 end;
 
-function TCachedStreamWriter.InternalCallback(Sender: TCachedBuffer;
-  Data: PByte; Size: NativeUInt): NativeUInt;
+function TCachedStreamWriter.InternalCallback(const ASender: TCachedBuffer;
+  AData: PByte; ASize: NativeUInt): NativeUInt;
 var
   S, R: Longint;
   N: NativeUInt;
 begin
   Result := 0;
 
-  while (Size <> 0) do
+  while (ASize <> 0) do
   begin
-    S := Size;
-    if (Size > NativeUInt(High(Longint))) then S := High(Longint);
+    S := ASize;
+    if (ASize > NativeUInt(High(Longint))) then S := High(Longint);
 
-    R := Stream.Write(Data^, S);
+    R := Stream.Write(AData^, S);
     if (R > 0) then
     begin
       N := NativeUInt(R);
       Inc(Result, N);
-      Inc(Data, N);
-      Dec(Size, N);
+      Inc(AData, N);
+      Dec(ASize, N);
     end;
 
     if (R <> S) then Break;
@@ -414,14 +402,14 @@ end;
 { TCachedBufferStream }
 
 {$ifNdef KOL}
-constructor TCachedBufferStream.Create(const CachedBuffer: TCachedBuffer;
-  const Owner: Boolean);
+constructor TCachedBufferStream.Create(const ACachedBuffer: TCachedBuffer;
+  const AOwner: Boolean);
 begin
   inherited Create;
 
-  FKind := CachedBuffer.Kind;
-  FOwner := Owner;
-  FCachedBuffer := CachedBuffer;
+  FKind := ACachedBuffer.Kind;
+  FOwner := AOwner;
+  FCachedBuffer := ACachedBuffer;
 end;
 {$else}
   {$IFDEF STREAM_LARGE64}
@@ -429,14 +417,14 @@ end;
   {$ENDIF}
   procedure FillCachedBufferStreamMethods(Stream: PCachedBufferStream); forward;
 
-function NewCachedBufferStream(const CachedBuffer: TCachedBuffer;
-  const Owner: Boolean = False): PCachedBufferStream;
+function NewCachedBufferStream(const ACachedBuffer: TCachedBuffer;
+  const AOwner: Boolean = False): PCachedBufferStream;
 begin
   New(Result, Create);
 
-  Result.FKind := CachedBuffer.Kind;
-  Result.FOwner := Owner;
-  Result.FCachedBuffer := CachedBuffer;
+  Result.FKind := ACachedBuffer.Kind;
+  Result.FOwner := AOwner;
+  Result.FCachedBuffer := ACachedBuffer;
 
   FillCachedBufferStreamMethods(Result);
 end;
@@ -448,34 +436,34 @@ begin
   if (FOwner) then FCachedBuffer.Free;
 end;
 
-function CachedBufferSeek(const CachedBuffer: TCachedBuffer;
-  Offset: Int64; Origin: Word): Int64;
+function CachedBufferSeek(const ACachedBuffer: TCachedBuffer;
+  AOffset: Int64; AOrigin: Word): Int64;
 const
   soFromBeginning = 0;
   soFromCurrent = 1;
 var
-  Temp: Int64;
-  Count: NativeUInt;
+  LTemp: Int64;
+  LCount: NativeUInt;
 begin
-  Result := CachedBuffer.Position;
-  if (Origin = soFromBeginning) then
+  Result := ACachedBuffer.Position;
+  if (AOrigin = soFromBeginning) then
   begin
-    Temp := Offset;
-    Offset := Offset - Result;
-    Result := Temp{from beginning Offset};
+    LTemp := AOffset;
+    AOffset := AOffset - Result;
+    Result := LTemp{from beginning Offset};
   end;
-  if (Origin <= soFromCurrent) and (Offset = 0) then
+  if (AOrigin <= soFromCurrent) and (AOffset = 0) then
     Exit;
 
-  if (CachedBuffer.Kind = cbReader) and (Origin <= soFromCurrent) and (Offset > 0) then
+  if (ACachedBuffer.Kind = cbReader) and (AOrigin <= soFromCurrent) and (AOffset > 0) then
   begin
-    while (Offset <> 0) do
+    while (AOffset <> 0) do
     begin
-      Count := Offset;
-      if (Count > NativeUInt(High(NativeInt))) then Count := NativeUInt(High(NativeInt));
-      Offset := Offset - Int64(Count);
+      LCount := AOffset;
+      if (LCount > NativeUInt(High(NativeInt))) then LCount := NativeUInt(High(NativeInt));
+      AOffset := AOffset - Int64(LCount);
 
-      TCachedReader(CachedBuffer).Skip(Count);
+      TCachedReader(ACachedBuffer).Skip(LCount);
     end;
   end else
     raise ECachedBuffer.Create('Invalid seek operation');
@@ -589,14 +577,14 @@ end;
 
 { TCachedBufferAdapter }
 
-constructor TCachedBufferAdapter.Create(const CachedBuffer: TCachedBuffer;
-  const Owner: Boolean);
+constructor TCachedBufferAdapter.Create(const ACachedBuffer: TCachedBuffer;
+  const AOwner: Boolean);
 begin
   inherited Create;
 
-  FKind := CachedBuffer.Kind;
-  FOwner := Owner;
-  FCachedBuffer := CachedBuffer;
+  FKind := ACachedBuffer.Kind;
+  FOwner := AOwner;
+  FCachedBuffer := ACachedBuffer;
 end;
 
 destructor TCachedBufferAdapter.Destroy;
@@ -613,7 +601,7 @@ function TCachedBufferAdapter.Read(pv: Pointer; cb: Longint; pcbRead: PLongint):
 function TCachedBufferAdapter.Read(pv: Pointer; cb: FixedUInt; pcbRead: PFixedUInt): HResult;
 {$ifend}
 var
-  NumRead: Longint;
+  LNumRead: Longint;
 begin
   if (FKind = cbWriter) then
   begin
@@ -630,14 +618,14 @@ begin
 
     if (cb <= 0) then
     begin
-      NumRead := 0;
+      LNumRead := 0;
     end else
     begin
-      NumRead := cb;
-      TCachedReader(Self.CachedBuffer).Read(pv^, NumRead);
+      LNumRead := cb;
+      TCachedReader(Self.CachedBuffer).Read(pv^, LNumRead);
     end;
 
-    if (pcbRead <> nil) then pcbRead^ := NumRead;
+    if (pcbRead <> nil) then pcbRead^ := LNumRead;
     Result := S_OK;
   except
     Result := S_FALSE;
@@ -652,7 +640,7 @@ function TCachedBufferAdapter.Write(pv: Pointer; cb: Longint; pcbWritten: PLongi
 function TCachedBufferAdapter.Write(pv: Pointer; cb: FixedUInt; pcbWritten: PFixedUInt): HResult;
 {$ifend}
 var
-  NumWritten: Longint;
+  LNumWritten: Longint;
 begin
   if (FKind = cbReader) then
   begin
@@ -669,14 +657,14 @@ begin
 
     if (cb <= 0) then
     begin
-      NumWritten := 0;
+      LNumWritten := 0;
     end else
     begin
-      NumWritten := cb;
-      TCachedWriter(Self.CachedBuffer).Write(pv^, NumWritten);
+      LNumWritten := cb;
+      TCachedWriter(Self.CachedBuffer).Write(pv^, LNumWritten);
     end;
 
-    if (pcbWritten <> nil) then pcbWritten^ := NumWritten;
+    if (pcbWritten <> nil) then pcbWritten^ := LNumWritten;
     Result := S_OK;
   except
     Result := STG_E_CANTSAVE;
@@ -691,7 +679,7 @@ function TCachedBufferAdapter.Seek(dlibMove: Largeint; dwOrigin: Longint; out li
 function TCachedBufferAdapter.Seek(dlibMove: Largeint; dwOrigin: DWORD; out libNewPosition: LargeUInt): HResult;
 {$ifend}
 var
-  NewPos: Largeint;
+  LNewPos: Largeint;
 begin
   try
     if (Integer(dwOrigin) < STREAM_SEEK_SET) or (dwOrigin > STREAM_SEEK_END) then
@@ -700,8 +688,8 @@ begin
       Exit;
     end;
 
-    NewPos := CachedBufferSeek(CachedBuffer, dlibMove, dwOrigin);
-    if (@libNewPosition <> nil) then libNewPosition := NewPos;
+    LNewPos := CachedBufferSeek(CachedBuffer, dlibMove, dwOrigin);
+    if (@libNewPosition <> nil) then libNewPosition := LNewPos;
     Result := S_OK;
   except
     Result := STG_E_INVALIDPOINTER;
@@ -733,8 +721,8 @@ function TCachedBufferAdapter.CopyTo(stm: IStream; cb: LargeUInt; out cbRead: La
 {$ifend}
 var
   N: NativeInt;
-  BytesRead, BytesWritten: Largeint;
   W: Longint;
+  LBytesRead, LBytesWritten: Largeint;
 begin
   if (Kind = cbWriter) then
   begin
@@ -742,8 +730,8 @@ begin
     Exit;
   end;
 
-  BytesRead := 0;
-  BytesWritten := 0;
+  LBytesRead := 0;
+  LBytesWritten := 0;
   try
     while (cb > 0) do
     begin
@@ -763,11 +751,11 @@ begin
       if (N > High(Longint)) then N := High(Longint);
       {$ifend}
       if (N > cb) then N := cb;
-      Inc(BytesRead, N);
+      Inc(LBytesRead, N);
 
       W := 0;
       Result := stm.Write(CachedBuffer.Current, N, Pointer(@W));
-      Inc(BytesWritten, W);
+      Inc(LBytesWritten, W);
       if (Result = S_OK) and (W <> N) then Result := E_FAIL;
       if (Result <> S_OK) then Exit;
 
@@ -775,8 +763,8 @@ begin
       Dec(cb, N);
     end;
 
-    if (@cbWritten <> nil) then cbWritten := BytesWritten;
-    if (@cbRead <> nil) then cbRead := BytesRead;
+    if (@cbWritten <> nil) then cbWritten := LBytesWritten;
+    if (@cbRead <> nil) then cbRead := LBytesRead;
     Result := S_OK;
   except
     Result := E_UNEXPECTED;

@@ -13,7 +13,7 @@ All the classes interacting among `TCachedReader`, `TCachedWriter` and `TStream`
 As a bonus there is an `NcMove` function accessible in the CachedBuffers.pas module which on the average is two times faster than the standard `Move` but which is designed for the non-overlapping memory areas.
 
 ##### TCachedBuffer
-The `TCachedBuffer` is a mutual ancestor for the `TCachedReader` and the `TCachedWriter`. The main class property is the `Memory`. It is a allocated memory buffer aligned to 4KB which also has `Previous` и `Additional` areas (the description will be given below). The size of the buffer is set in a constructor where the default value is 64KB. If the size is not multiple of 4KB then the size automatically align (e.g. 5000 aligns to 8192).
+The `TCachedBuffer` is a mutual ancestor for the `TCachedReader` and the `TCachedWriter`. The main class property is the `Memory`. It is a allocated memory buffer aligned to 4KB which also has `Previous` и `Additional` areas (the description will be given below). The size of the buffer is set in a constructor where the default value is 64KB. If the size is not multiple of 4KB then the size automatically align (e.g. 5000 aligns to 8192). Please note that in some cases (for example, fixed or preallocated), the size of the memory buffer, as well as the previous/additional areas, may be aligned to 1KB or be completely absent.
 ![](http://dmozulyov.ucoz.net/CachedBuffers/MemoryScheme.png)
 
 To fill or read the buffer is used `Current`/`Overflow` pair. `Current` indicates the position in a buffer and allows the direct access to the memory. `Overflow` is an upper limit of the buffer. `Margin` defines the number of bytes accessible in a buffer (`Overflow - Current`). The `Flush` function updates the buffer and returns the number of bytes accessible in a buffer (`Margin`). The function may return 0 if the reading or writing is over. 
@@ -21,10 +21,10 @@ To fill or read the buffer is used `Current`/`Overflow` pair. `Current` indicate
 The `EOF` is an indication of the end of the reading or writing, which also may be set to `True`. If needed it is possible to limit the reading or writing size by setting the `Limit` value.
 ```pascal
 TCachedBufferKind = (cbReader, cbWriter);
-TCachedBufferCallback = function(Sender: TCachedBuffer; Data: PByte; Size: NativeUInt): NativeUInt of object;
-TCachedBufferProgress = procedure(Sender: TCachedBuffer; var Cancel: Boolean) of object;
+TCachedBufferCallback = function(const ASender: TCachedBuffer; AData: PByte; ASize: NativeUInt): NativeUInt of object;
+TCachedBufferProgress = procedure(const ASender: TCachedBuffer; var ACancel: Boolean) of object;
 
-TCachedBuffer = class
+TCachedBuffer = class(TCachedObject)
 public
   Current: PByte;
   function Flush: NativeUInt;    
@@ -50,36 +50,36 @@ The `DirectRead` procedure allows data reading from a random place even without 
 ```pascal
 TCachedReader = class(TCachedBuffer)
 public
-  constructor Create(const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
-  procedure DirectRead(const Position: Int64; var Buffer; const Count: NativeUInt);
+  constructor Create(const ACallback: TCachedBufferCallback; const ABufferSize: NativeUInt = 0);
+  procedure DirectRead(const APosition: Int64; var ABuffer; const ACount: NativeUInt);
   property Finishing: Boolean read
-  procedure Skip(const Count: NativeUInt);
-  procedure Export(const Writer: TCachedWriter; const Count: NativeUInt = 0);
+  procedure Skip(const ACount: NativeUInt);
+  procedure Export(const AWriter: TCachedWriter; const ACount: NativeUInt = 0);
 
-  procedure Read(var Buffer; const Count: NativeUInt);
-  procedure ReadData(var Value: Boolean);
-  procedure ReadData(var Value: AnsiChar);
-  procedure ReadData(var Value: WideChar);
-  procedure ReadData(var Value: ShortInt);
-  procedure ReadData(var Value: Byte);
-  procedure ReadData(var Value: SmallInt);
-  procedure ReadData(var Value: Word);
-  procedure ReadData(var Value: Integer); 
-  procedure ReadData(var Value: Cardinal);
-  procedure ReadData(var Value: Int64); 
-  procedure ReadData(var Value: UInt64);
-  procedure ReadData(var Value: Single);
-  procedure ReadData(var Value: Double);
-  procedure ReadData(var Value: TExtended80Rec);
-  procedure ReadData(var Value: Currency);
-  procedure ReadData(var Value: TPoint);
-  procedure ReadData(var Value: TRect); 
-  procedure ReadData(var Value: ShortString); 
-  procedure ReadData(var Value: AnsiString; CodePage: Word = 0);
-  procedure ReadData(var Value: WideString);
-  procedure ReadData(var Value: UnicodeString);
-  procedure ReadData(var Value: TBytes); 
-  procedure ReadData(var Value: Variant);
+  procedure Read(var ABuffer; const ACount: NativeUInt);
+  procedure ReadData(var AValue: Boolean);
+  procedure ReadData(var AValue: AnsiChar);
+  procedure ReadData(var AValue: WideChar);
+  procedure ReadData(var AValue: ShortInt);
+  procedure ReadData(var AValue: Byte);
+  procedure ReadData(var AValue: SmallInt);
+  procedure ReadData(var AValue: Word);
+  procedure ReadData(var AValue: Integer); 
+  procedure ReadData(var AValue: Cardinal);
+  procedure ReadData(var AValue: Int64); 
+  procedure ReadData(var AValue: UInt64);
+  procedure ReadData(var AValue: Single);
+  procedure ReadData(var AValue: Double);
+  procedure ReadData(var AValue: TExtended80Rec);
+  procedure ReadData(var AValue: Currency);
+  procedure ReadData(var AValue: TPoint);
+  procedure ReadData(var AValue: TRect); 
+  procedure ReadData(var AValue: ShortString); 
+  procedure ReadData(var AValue: AnsiString; ACodePage: Word = 0);
+  procedure ReadData(var AValue: WideString);
+  procedure ReadData(var AValue: UnicodeString);
+  procedure ReadData(var AValue: TBytes); 
+  procedure ReadData(var AValue: Variant);
 end;
 ```
 ##### TCachedWriter
@@ -89,34 +89,34 @@ The size of the `Memory.Previous` area may be equal 0 that is why do not write a
 ```pascal
 TCachedWriter = class(TCachedBuffer)
 public
-  constructor Create(const Callback: TCachedBufferCallback; const BufferSize: NativeUInt = 0);
-  procedure DirectWrite(const Position: Int64; const Buffer; const Count: NativeUInt);
-  procedure Import(const Reader: TCachedReader; const Count: NativeUInt = 0);
+  constructor Create(const ACallback: TCachedBufferCallback; const ABufferSize: NativeUInt = 0);
+  procedure DirectWrite(const APosition: Int64; const ABuffer; const ACount: NativeUInt);
+  procedure Import(const AReader: TCachedReader; const ACount: NativeUInt = 0);
 
-  procedure Write(const Buffer; const Count: NativeUInt);
-  procedure WriteData(const Value: Boolean);    
-  procedure WriteData(const Value: AnsiChar);    
-  procedure WriteData(const Value: WideChar);
-  procedure WriteData(const Value: ShortInt);
-  procedure WriteData(const Value: Byte); 
-  procedure WriteData(const Value: SmallInt);
-  procedure WriteData(const Value: Word);
-  procedure WriteData(const Value: Integer); 
-  procedure WriteData(const Value: Cardinal);
-  procedure WriteData(const Value: Int64);    
-  procedure WriteData(const Value: UInt64);    
-  procedure WriteData(const Value: Single);
-  procedure WriteData(const Value: Double);
-  procedure WriteData(const Value: TExtended80Rec);
-  procedure WriteData(const Value: Currency);
-  procedure WriteData(const Value: TPoint);
-  procedure WriteData(const Value: TRect); 
-  procedure WriteData(const Value: ShortString);
-  procedure WriteData(const Value: AnsiString); 
-  procedure WriteData(const Value: WideString); 
-  procedure WriteData(const Value: UnicodeString);
-  procedure WriteData(const Value: TBytes); 
-  procedure WriteData(const Value: Variant);
+  procedure Write(const ABuffer; const ACount: NativeUInt);
+  procedure WriteData(const AValue: Boolean);    
+  procedure WriteData(const AValue: AnsiChar);    
+  procedure WriteData(const AValue: WideChar);
+  procedure WriteData(const AValue: ShortInt);
+  procedure WriteData(const AValue: Byte); 
+  procedure WriteData(const AValue: SmallInt);
+  procedure WriteData(const AValue: Word);
+  procedure WriteData(const AValue: Integer); 
+  procedure WriteData(const AValue: Cardinal);
+  procedure WriteData(const AValue: Int64);    
+  procedure WriteData(const AValue: UInt64);    
+  procedure WriteData(const AValue: Single);
+  procedure WriteData(const AValue: Double);
+  procedure WriteData(const AValue: TExtended80Rec);
+  procedure WriteData(const AValue: Currency);
+  procedure WriteData(const AValue: TPoint);
+  procedure WriteData(const AValue: TRect); 
+  procedure WriteData(const AValue: ShortString);
+  procedure WriteData(const AValue: AnsiString); 
+  procedure WriteData(const AValue: WideString); 
+  procedure WriteData(const AValue: UnicodeString);
+  procedure WriteData(const AValue: TBytes); 
+  procedure WriteData(const AValue: Variant);
 end;
 ```
 ##### TCachedReReader
@@ -124,7 +124,7 @@ The `TCachedReReader` is an intermediate member in reading tasks where a sequent
 ```pascal
 TCachedReReader = class(TCachedReader)  
 public
-  constructor Create(const Callback: TCachedBufferCallback; const Source: TCachedReader; const Owner: Boolean = False; const BufferSize: NativeUInt = 0);
+  constructor Create(const ACallback: TCachedBufferCallback; const ASource: TCachedReader; const AOwner: Boolean = False; const ABufferSize: NativeUInt = 0);
   property Source: TCachedReader read
   property Owner: Boolean read/write
 end;
@@ -134,7 +134,7 @@ The `TCachedReWriter` is an intermediate member in writing tasks where a sequent
 ```pascal
 TCachedReWriter = class(TCachedWriter)
 public
-  constructor Create(const Callback: TCachedBufferCallback; const Target: TCachedWriter; const Owner: Boolean = False; const BufferSize: NativeUInt = 0);
+  constructor Create(const ACallback: TCachedBufferCallback; const ATarget: TCachedWriter; const AOwner: Boolean = False; const ABufferSize: NativeUInt = 0);
   property Target: TCachedWriter read
   property Owner: Boolean read/write  
 end;
@@ -144,8 +144,8 @@ The `TCachedFileReader` is a standard class designed for files reading of their 
 ```pascal
 TCachedFileReader = class(TCachedReader)
 public
-  constructor Create(const FileName: string; const Offset: Int64 = 0; const Size: Int64 = 0);
-  constructor CreateHandled(const Handle: THandle; const Size: Int64 = 0; const HandleOwner: Boolean = False);
+  constructor Create(const AFileName: string; const AOffset: Int64 = 0; const ASize: Int64 = 0);
+  constructor CreateHandled(const AHandle: THandle; const ASize: Int64 = 0; const AHandleOwner: Boolean = False);
   property FileName: string read
   property Handle: THandle read
   property HandleOwner: Boolean read/write
@@ -157,8 +157,8 @@ The `TCachedFileWriter` is a standard class designed for files writing or their 
 ```pascal
 TCachedFileWriter = class(TCachedWriter)
 public
-  constructor Create(const FileName: string; const Size: Int64 = 0); 
-  constructor CreateHandled(const Handle: THandle; const Size: Int64 = 0; const HandleOwner: Boolean = False);
+  constructor Create(const AFileName: string; const ASize: Int64 = 0); 
+  constructor CreateHandled(const AHandle: THandle; const ASize: Int64 = 0; const AHandleOwner: Boolean = False);
   property FileName: string read
   property Handle: THandle read
   property HandleOwner: Boolean read/write
@@ -166,21 +166,21 @@ public
 end;
 ```
 ##### TCachedMemoryReader
-`TCachedMemoryReader` is a standard class designed for compatibility of the `TCachedReader` with the reading from a fixed memory area.  The `Limit` property is automatically set and it equals `Size`.
+`TCachedMemoryReader` is a standard class designed for compatibility of the `TCachedReader` with the reading from a specified memory area. The `Limit` property is automatically set and it equals `Size`. The `Fixed` parameter allows you to read data from memory directly, but this can lead to errors, because the standard logic of memory alignment and vailability of previous/additional areas is broken.
 ```pascal
 TCachedMemoryReader = class(TCachedReader)
 public
-  constructor Create(const Ptr: Pointer; const Size: NativeUInt);
+  constructor Create(const APtr: Pointer; const ASize: NativeUInt; const AFixed: Boolean = False);
   property Ptr: Pointer read
   property Size: NativeUInt read
 end;
 ```
 ##### TCachedMemoryWriter
-`TCachedMemoryWriter` is a standard class designed for compatibility of the `TCachedWriter` with the writing to the temporary or fixed memory area. If it is a `CreateTemporary` then the `Ptr` memory resizes with every `Flush` calling.
+`TCachedMemoryWriter` is a standard class designed for compatibility of the `TCachedWriter` with the writing to the temporary or specified memory area. If it is a `CreateTemporary` then the `Ptr` memory resizes with every `Flush` calling. The `Fixed` parameter allows you to write data into memory directly, but this can lead to errors, because the standard logic of memory alignment and vailability of previous/additional areas is broken.
 ```pascal
 TCachedMemoryWriter = class(TCachedWriter)
 public
-  constructor Create(const Ptr: Pointer; const Size: NativeUInt);
+  constructor Create(const APtr: Pointer; const ASize: NativeUInt; const AFixed: Boolean = False);
   constructor CreateTemporary;
   property Temporary: Boolean read
   property Ptr: Pointer read
@@ -188,11 +188,11 @@ public
 end;
 ```
 ##### TCachedResourceReader
-`TCachedResourceReader` is a standard class designed for compatibility of the `TCachedReader` with the reading of the resources. It repeats interface of the `Classes.TResourceStream`. It is accessible only on Windows platform.
+`TCachedResourceReader` is a standard class designed for compatibility of the `TCachedReader` with the reading of the resources. It repeats interface of the `Classes.TResourceStream`.
 ```pascal
 TCachedResourceReader = class(TCachedMemoryReader)
 public
-  constructor Create(Instance: THandle; const ResName: string; ResType: PChar);
-  constructor CreateFromID(Instance: THandle; ResID: Word; ResType: PChar);
+  constructor Create(const AInstance: THandle; const AResName: string; const AResType: PChar; const AFixed: Boolean = False);
+  constructor CreateFromID(const AInstance: THandle; const AResID: Word; const AResType: PChar; const AFixed: Boolean = False);
 end;
 ```
