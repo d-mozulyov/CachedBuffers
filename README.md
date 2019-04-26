@@ -1,8 +1,8 @@
 # CachedBuffers
 The library is irreplaceable for the tasks of sequential data reading or writing, especially if the requirements for the performance are increased and there are much data. The library is based on two main classes of the module CachedBuffers.pas:  `TCachedReader` and `TCachedWriter`. The functionality of these two classes largely repeats the standard `TStream` class, but the difference is that you are using a convenient temporary memory buffer. Such architecture makes it possible to give the direct access to the memory and to increase productivity avoid calling virtual functions, universal implementations and API features of operating systems. An example of usage of the library and the illustration of a high performance can be seen in the demonstration projects.
 
-[Demo.zip]( http://dmozulyov.ucoz.net/CachedBuffers/Demo.zip)
-![](http://dmozulyov.ucoz.net/CachedBuffers/ScreenShots.png)
+[Demo.zip](https://github.com/d-mozulyov/CachedBuffers/raw/master/data/Demo.zip)
+![](https://github.com/d-mozulyov/CachedBuffers/raw/master/data/ScreenShots.png)
 
 The `TCachedReader` and `TCachedWriter` classes are supposed to indicate a callback in order to fulfill or commit a buffer.  However, the library already contains a several standard classes which help to perform distributed tasks: `TCachedFileReader`, `TCachedFileWriter`, `TCachedMemoryReader`, `TCachedMemoryWriter` and `TCachedResourceReader`. In the future there also may be standard classes for the network interaction.
 
@@ -14,7 +14,7 @@ As a bonus there is an `NcMove` function accessible in the CachedBuffers.pas mod
 
 ##### TCachedBuffer
 The `TCachedBuffer` is a mutual ancestor for the `TCachedReader` and the `TCachedWriter`. The main class property is the `Memory`. It is a allocated memory buffer aligned to 4KB which also has `Previous` и `Additional` areas (the description will be given below). The size of the buffer is set in a constructor where the default value is 64KB. If the size is not multiple of 4KB then the size automatically align (e.g. 5000 aligns to 8192). Please note that in some cases (for example, fixed or preallocated), the size of the memory buffer, as well as the previous/additional areas, may be aligned to 1KB or be completely absent.
-![](http://dmozulyov.ucoz.net/CachedBuffers/MemoryScheme.png)
+![](https://github.com/d-mozulyov/CachedBuffers/raw/master/data/MemoryScheme.png)
 
 To fill or read the buffer is used `Current`/`Overflow` pair. `Current` indicates the position in a buffer and allows the direct access to the memory. `Overflow` is an upper limit of the buffer. `Margin` defines the number of bytes accessible in a buffer (`Overflow - Current`). The `Flush` function updates the buffer and returns the number of bytes accessible in a buffer (`Margin`). The function may return 0 if the reading or writing is over. 
 
