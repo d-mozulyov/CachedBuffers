@@ -1,7 +1,7 @@
 unit CachedBuffers;
 
 {******************************************************************************}
-{ Copyright (c) 2013-2019 Dmitry Mozulyov                                           }
+{ Copyright (c) Dmitry Mozulyov                                                }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -34,6 +34,7 @@ unit CachedBuffers;
   {$define INLINESUPPORT}
   {$define INLINESUPPORTSIMPLE}
   {$define OPERATORSUPPORT}
+  {$define STATICSUPPORT}
   {$define ANSISTRSUPPORT}
   {$define SHORTSTRSUPPORT}
   {$define WIDESTRSUPPORT}
@@ -69,14 +70,24 @@ unit CachedBuffers;
   {$if CompilerVersion >= 18}
     {$define OPERATORSUPPORT}
   {$ifend}
+  {$if CompilerVersion >= 18.5}
+    {$define STATICSUPPORT}
+  {$ifend}
   {$if CompilerVersion < 23}
     {$define CPUX86}
-  {$else}
+  {$ifend}
+  {$if CompilerVersion >= 23}
     {$define UNITSCOPENAMES}
+    {$define RETURNADDRESS}
+    {$define SYSARRAYSUPPORT}
   {$ifend}
   {$if CompilerVersion >= 21}
     {$WEAKLINKRTTI ON}
     {$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
+    {$define EXTENDEDRTTI}
+  {$ifend}
+  {$if CompilerVersion >= 33}
+    {$define MANAGEDRECORDS}
   {$ifend}
   {$if (not Defined(NEXTGEN)) or (CompilerVersion >= 31)}
     {$define ANSISTRSUPPORT}
@@ -84,7 +95,7 @@ unit CachedBuffers;
   {$ifNdef NEXTGEN}
     {$define SHORTSTRSUPPORT}
   {$endif}
-  {$if Defined(MSWINDOWS) or Defined(MACOS)}
+  {$if Defined(MSWINDOWS) or (Defined(MACOS) and not Defined(IOS))}
     {$define WIDESTRSUPPORT}
   {$ifend}
   {$if Defined(MSWINDOWS) or (Defined(WIDESTRSUPPORT) and (CompilerVersion <= 21))}
@@ -92,6 +103,9 @@ unit CachedBuffers;
   {$ifend}
   {$if Defined(ANSISTRSUPPORT) and (CompilerVersion >= 20)}
     {$define INTERNALCODEPAGE}
+  {$ifend}
+  {$if Defined(NEXTGEN)}
+    {$POINTERMATH ON}
   {$ifend}
 {$endif}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
@@ -110,6 +124,13 @@ unit CachedBuffers;
   {$ifend}
   {$define CPUINTEL}
 {$endif}
+{$if Defined(CPUINTEL) and Defined(POSIX)}
+  {$ifdef CPUX86}
+    {$define POSIXINTEL32}
+  {$else}
+    {$define POSIXINTEL64}
+  {$endif}
+{$ifend}
 {$if Defined(CPUX64) or Defined(CPUARM64)}
   {$define LARGEINT}
 {$else}
@@ -142,7 +163,7 @@ interface
        {$endif};
 
 type
-  // standard types
+  // RTL types
   {$ifdef FPC}
     PUInt64 = ^UInt64;
     PBoolean = ^Boolean;
@@ -162,17 +183,22 @@ type
     {$ifend}
     PWord = ^Word;
   {$endif}
+  {$if not Defined(FPC) and (CompilerVersion < 20)}
+  TDate = type TDateTime;
+  TTime = type TDateTime;
+  {$ifend}
+  PDate = ^TDate;
+  PTime = ^TTime;
   {$if SizeOf(Extended) >= 10}
     {$define EXTENDEDSUPPORT}
   {$ifend}
-  TBytes = {$if (not Defined(FPC)) and (CompilerVersion >= 23)}TArray<Byte>{$else}array of Byte{$ifend};
+  TBytes = {$ifdef SYSARRAYSUPPORT}TArray<Byte>{$else}array of Byte{$endif};
   PBytes = ^TBytes;
   {$if Defined(NEXTGEN) and (CompilerVersion >= 31)}
     AnsiChar = type System.UTF8Char;
     PAnsiChar = ^AnsiChar;
     AnsiString = type System.RawByteString;
     PAnsiString = ^AnsiString;
-    {$POINTERMATH ON}
   {$ifend}
 
 
@@ -293,6 +319,7 @@ type
     procedure SetEOF(const AValue: Boolean);
     procedure SetLimit(const AValue: Int64);
     function CheckLimit(const AValue: Int64): Boolean; virtual;
+    function DoFlush: NativeUInt;
     function DoWriterFlush: Boolean;
     function DoReaderFlush: Boolean;
     function DoProgress: Boolean;
@@ -1547,6 +1574,22 @@ begin
 end;
 
 function TCachedBuffer.Flush: NativeUInt;
+var
+  LDone: Boolean;
+begin
+  LDone := False;
+  try
+    Result := DoFlush;
+    LDone := True;
+  finally
+    if (not LDone) then
+    begin
+      SetEOF({EOF := }True);
+    end;
+  end;
+end;
+
+function TCachedBuffer.DoFlush: NativeUInt;
 var
   LCurrent, LOverflow, LMemoryLow, LMemoryHigh: NativeUInt;
   LNewPositionBase: Int64;

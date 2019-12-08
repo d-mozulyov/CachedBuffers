@@ -1,7 +1,7 @@
 unit CachedStreams;
 
 {******************************************************************************}
-{ Copyright (c) 2013-2019 Dmitry Mozulyov                                           }
+{ Copyright (c) Dmitry Mozulyov                                                }
 {                                                                              }
 { Permission is hereby granted, free of charge, to any person obtaining a copy }
 { of this software and associated documentation files (the "Software"), to deal}
@@ -34,6 +34,14 @@ unit CachedStreams;
   {$define INLINESUPPORT}
   {$define INLINESUPPORTSIMPLE}
   {$define OPERATORSUPPORT}
+  {$define STATICSUPPORT}
+  {$define ANSISTRSUPPORT}
+  {$define SHORTSTRSUPPORT}
+  {$define WIDESTRSUPPORT}
+  {$ifdef MSWINDOWS}
+    {$define WIDESTRLENSHIFT}
+  {$endif}
+  {$define INTERNALCODEPAGE}
   {$ifdef CPU386}
     {$define CPUX86}
   {$endif}
@@ -51,6 +59,7 @@ unit CachedStreams;
     {$WARN UNSAFE_CODE OFF}
     {$WARN UNSAFE_TYPE OFF}
     {$WARN UNSAFE_CAST OFF}
+    {$WARN SYMBOL_DEPRECATED OFF}
   {$ifend}
   {$if CompilerVersion >= 20}
     {$define INLINESUPPORT}
@@ -61,14 +70,42 @@ unit CachedStreams;
   {$if CompilerVersion >= 18}
     {$define OPERATORSUPPORT}
   {$ifend}
+  {$if CompilerVersion >= 18.5}
+    {$define STATICSUPPORT}
+  {$ifend}
   {$if CompilerVersion < 23}
     {$define CPUX86}
-  {$else}
+  {$ifend}
+  {$if CompilerVersion >= 23}
     {$define UNITSCOPENAMES}
+    {$define RETURNADDRESS}
+    {$define SYSARRAYSUPPORT}
   {$ifend}
   {$if CompilerVersion >= 21}
     {$WEAKLINKRTTI ON}
     {$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
+    {$define EXTENDEDRTTI}
+  {$ifend}
+  {$if CompilerVersion >= 33}
+    {$define MANAGEDRECORDS}
+  {$ifend}
+  {$if (not Defined(NEXTGEN)) or (CompilerVersion >= 31)}
+    {$define ANSISTRSUPPORT}
+  {$ifend}
+  {$ifNdef NEXTGEN}
+    {$define SHORTSTRSUPPORT}
+  {$endif}
+  {$if Defined(MSWINDOWS) or (Defined(MACOS) and not Defined(IOS))}
+    {$define WIDESTRSUPPORT}
+  {$ifend}
+  {$if Defined(MSWINDOWS) or (Defined(WIDESTRSUPPORT) and (CompilerVersion <= 21))}
+    {$define WIDESTRLENSHIFT}
+  {$ifend}
+  {$if Defined(ANSISTRSUPPORT) and (CompilerVersion >= 20)}
+    {$define INTERNALCODEPAGE}
+  {$ifend}
+  {$if Defined(NEXTGEN)}
+    {$POINTERMATH ON}
   {$ifend}
 {$endif}
 {$U-}{$V+}{$B-}{$X+}{$T+}{$P+}{$H+}{$J-}{$Z1}{$A4}
@@ -87,6 +124,13 @@ unit CachedStreams;
   {$ifend}
   {$define CPUINTEL}
 {$endif}
+{$if Defined(CPUINTEL) and Defined(POSIX)}
+  {$ifdef CPUX86}
+    {$define POSIXINTEL32}
+  {$else}
+    {$define POSIXINTEL64}
+  {$endif}
+{$ifend}
 {$if Defined(CPUX64) or Defined(CPUARM64)}
   {$define LARGEINT}
 {$else}
@@ -123,7 +167,7 @@ interface
        CachedBuffers;
 
 type
-  // standard types
+  // RTL types
   {$ifdef FPC}
     PUInt64 = ^UInt64;
     PBoolean = ^Boolean;
@@ -143,11 +187,23 @@ type
     {$ifend}
     PWord = ^Word;
   {$endif}
+  {$if not Defined(FPC) and (CompilerVersion < 20)}
+  TDate = type TDateTime;
+  TTime = type TDateTime;
+  {$ifend}
+  PDate = ^TDate;
+  PTime = ^TTime;
   {$if SizeOf(Extended) >= 10}
     {$define EXTENDEDSUPPORT}
   {$ifend}
-  TBytes = {$if (not Defined(FPC)) and (CompilerVersion >= 23)}TArray<Byte>{$else}array of Byte{$ifend};
+  TBytes = {$ifdef SYSARRAYSUPPORT}TArray<Byte>{$else}array of Byte{$endif};
   PBytes = ^TBytes;
+  {$if Defined(NEXTGEN) and (CompilerVersion >= 31)}
+    AnsiChar = type System.UTF8Char;
+    PAnsiChar = ^AnsiChar;
+    AnsiString = type System.RawByteString;
+    PAnsiString = ^AnsiString;
+  {$ifend}
 
   // CachedBuffers types
   ECachedBuffer = CachedBuffers.ECachedBuffer;
