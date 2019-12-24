@@ -35,6 +35,7 @@ unit CachedStreams;
   {$define INLINESUPPORTSIMPLE}
   {$define OPERATORSUPPORT}
   {$define STATICSUPPORT}
+  {$define GENERICSUPPORT}
   {$define ANSISTRSUPPORT}
   {$define SHORTSTRSUPPORT}
   {$define WIDESTRSUPPORT}
@@ -73,13 +74,16 @@ unit CachedStreams;
   {$if CompilerVersion >= 18.5}
     {$define STATICSUPPORT}
   {$ifend}
+  {$if CompilerVersion >= 20}
+    {$define GENERICSUPPORT}
+    {$define SYSARRAYSUPPORT}
+  {$ifend}
   {$if CompilerVersion < 23}
     {$define CPUX86}
   {$ifend}
   {$if CompilerVersion >= 23}
     {$define UNITSCOPENAMES}
     {$define RETURNADDRESS}
-    {$define SYSARRAYSUPPORT}
   {$ifend}
   {$if CompilerVersion >= 21}
     {$WEAKLINKRTTI ON}
